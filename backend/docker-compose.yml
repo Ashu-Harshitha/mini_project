@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agriadvisor_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agriadvisor
+      POSTGRES_PASSWORD: agriadvisor_secret
+      POSTGRES_DB: agriadvisor_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agriadvisor -d agriadvisor_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: agriadvisor_chroma
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+
+  api:
+    build: .
+    container_name: agriadvisor_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://agriadvisor:agriadvisor_secret@postgres:5432/agriadvisor_db
+      - AI_MODE=mock
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    volumes:
+      - ./uploads:/app/uploads
+
+volumes:
+  postgres_data:
+  chroma_data:
