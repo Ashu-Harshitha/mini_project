@@ -24,6 +24,9 @@ import { AgronomistReviewQueue } from '@/pages/AgronomistReviewQueue';
 import { OutcomeFeedbackPage } from '@/pages/OutcomeFeedbackPage';
 import { GuardrailRulesAdmin } from '@/pages/GuardrailRulesAdmin';
 import { ManageUsers } from '@/pages/ManageUsers';
+import { AdminCases } from '@/pages/AdminCases';
+import { AdminCommunications } from '@/pages/AdminCommunications';
+import { AdminFeedback } from '@/pages/AdminFeedback';
 
 export const App: React.FC = () => {
   const { 
@@ -141,24 +144,77 @@ export const App: React.FC = () => {
           }
         >
           <Route path="dashboard" element={<Dashboard />} />
-          <Route path="new-case" element={<NewCaseWizard />} />
           <Route path="cases" element={<CaseHistory />} />
           <Route path="cases/:id" element={<CaseDetail />} />
-          <Route path="models" element={<ModelComparison />} />
-          <Route path="prompt-lab" element={<PromptLab />} />
-          <Route path="evaluation" element={<Evaluation />} />
-          <Route path="responsible-ai" element={<ResponsibleAi />} />
-          <Route path="rag-explorer" element={<RagExplorer />} />
           <Route path="settings" element={<Settings />} />
           <Route path="notifications" element={<NotificationsPage />} />
-          <Route path="feedback" element={<OutcomeFeedbackPage />} />
 
-          {/* Role-Guarded Routes */}
+          {/* Farmer exclusive routes */}
+          <Route
+            path="new-case"
+            element={
+              <RoleGuard allowedRoles={['farmer']}>
+                <NewCaseWizard />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="feedback"
+            element={
+              <RoleGuard allowedRoles={['farmer']}>
+                <OutcomeFeedbackPage />
+              </RoleGuard>
+            }
+          />
+
+          {/* Agronomist & Admin routes */}
           <Route
             path="review-queue"
             element={
               <RoleGuard allowedRoles={['agronomist', 'admin']}>
                 <AgronomistReviewQueue />
+              </RoleGuard>
+            }
+          />
+
+          {/* Admin exclusive routes */}
+          <Route
+            path="admin/agronomists"
+            element={
+              <RoleGuard allowedRoles={['admin']}>
+                <ManageUsers />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="admin/users"
+            element={
+              <RoleGuard allowedRoles={['admin']}>
+                <ManageUsers />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="admin/cases"
+            element={
+              <RoleGuard allowedRoles={['admin']}>
+                <AdminCases />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="admin/communications"
+            element={
+              <RoleGuard allowedRoles={['admin']}>
+                <AdminCommunications />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="admin/feedback"
+            element={
+              <RoleGuard allowedRoles={['admin']}>
+                <AdminFeedback />
               </RoleGuard>
             }
           />
@@ -171,10 +227,42 @@ export const App: React.FC = () => {
             }
           />
           <Route
-            path="admin/users"
+            path="prompt-lab"
             element={
               <RoleGuard allowedRoles={['admin']}>
-                <ManageUsers />
+                <PromptLab />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="evaluation"
+            element={
+              <RoleGuard allowedRoles={['admin']}>
+                <Evaluation />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="models"
+            element={
+              <RoleGuard allowedRoles={['admin']}>
+                <ModelComparison />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="responsible-ai"
+            element={
+              <RoleGuard allowedRoles={['admin']}>
+                <ResponsibleAi />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="rag-explorer"
+            element={
+              <RoleGuard allowedRoles={['admin']}>
+                <RagExplorer />
               </RoleGuard>
             }
           />

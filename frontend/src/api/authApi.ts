@@ -35,4 +35,18 @@ export const authApi = {
   getMe: async (): Promise<UserMeResponse> => {
     return apiClient<UserMeResponse>('/me');
   },
+
+  updateAvailability: async (available: boolean): Promise<any> => {
+    return apiClient<any>('/me/availability', {
+      method: 'PATCH',
+      body: JSON.stringify({ available }),
+    });
+  },
+
+  updateLanguage: async (language: string): Promise<any> => {
+    return apiClient<any>('/me/language', {
+      method: 'PATCH',
+      body: JSON.stringify({ language }),
+    });
+  },
 };

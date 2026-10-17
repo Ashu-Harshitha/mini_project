@@ -1,371 +1,473 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { 
-  PlusCircle, 
-  FileText, 
-  TrendingUp, 
-  Clock, 
-  Users, 
-  AlertTriangle, 
-  AlertCircle, 
-  Info, 
-  CheckCircle2, 
+import {
+  PlusCircle,
+  Clock,
+  CheckCircle2,
+  Bell,
+  AlertTriangle,
+  Users,
+  MessageSquare,
+  Star,
   ArrowRight,
-  ExternalLink,
-  X
+  Sparkles,
+  ShieldCheck,
+  ChevronRight,
+  TrendingUp,
 } from 'lucide-react';
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  Tooltip, 
-  ResponsiveContainer, 
-  AreaChart, 
-  Area 
-} from 'recharts';
 import { useTranslation } from 'react-i18next';
-import { StatCard } from '@/components/StatCard';
-import { UncertaintyBadge } from '@/components/UncertaintyBadge';
-import { ConfidenceBar } from '@/components/ConfidenceBar';
 import { useAppStore } from '@/store/useAppStore';
-import { mockCases } from '@/mocks/data';
-import { units } from '@/lib/units';
+import { dashboardApi, type DashboardSummary } from '@/api/dashboardApi';
+import { casesApi } from '@/api/casesApi';
+import { StatusBadge } from '@/components/StatusBadge';
+import { type CaseItem } from '@/mocks/data';
 
 export const Dashboard: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { currentFarm, unitSystem } = useAppStore();
+  const { user } = useAppStore();
 
-  const acreageLabel = units.convertArea(currentFarm.totalAcreage, unitSystem).label;
+  const [summary, setSummary] = useState<any>(null);
+  const [recentCases, setRecentCases] = useState<CaseItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Alerts state
-  const [alerts, setAlerts] = useState([
-    {
-      id: 'a-1',
-      type: 'red',
-      message: 'High-risk chemical flagged in Case C-2844 — expert review required',
-      time: '1h ago',
-      link: '/cases/c-2844',
-    },
-    {
-      id: 'a-2',
-      type: 'yellow',
-      message: 'Model confidence below threshold on 3 recent wheat cases',
-      time: '3h ago',
-      link: '/cases/c-2845',
-    },
-    {
-      id: 'a-3',
-      type: 'blue',
-      message: 'New agronomy RAG index refreshed — 2,847 documents indexed',
-      time: '6h ago',
-      link: '/rag-explorer',
-    },
-    {
-      id: 'a-4',
-      type: 'green',
-      message: 'Agronomist Dr. Chen approved 12 cases this week',
-      time: '1d ago',
-      link: '/review-queue',
-    },
-  ]);
+  const role = user?.role || 'farmer';
 
-  const dismissAlert = (id: string) => {
-    setAlerts((prev) => prev.filter((a) => a.id !== id));
-  };
+  useEffect(() => {
+    let active = true;
 
-  // Chart data: Case volume this week
-  const volumeData = [
-    { day: 'Mon', cases: 14, resolved: 10 },
-    { day: 'Tue', cases: 18, resolved: 15 },
-    { day: 'Wed', cases: 15, resolved: 13 },
-    { day: 'Thu', cases: 24, resolved: 18 },
-    { day: 'Fri', cases: 28, resolved: 22 },
-    { day: 'Sat', cases: 12, resolved: 8 },
-    { day: 'Sun', cases: 8, resolved: 6 },
-  ];
+    async function loadData() {
+      setLoading(true);
+      try {
+        const sum = await dashboardApi.getSummary();
+        if (active) setSummary(sum);
+      } catch (err) {
+        console.warn('Dashboard summary fetch fallback:', err);
+      }
 
-  // Chart data: Avg confidence 6 months
-  const confidenceData = [
-    { month: 'Apr', confidence: 71 },
-    { month: 'May', confidence: 73 },
-    { month: 'Jun', confidence: 76 },
-    { month: 'Jul', confidence: 78 },
-    { month: 'Aug', confidence: 81 },
-    { month: 'Sep', confidence: 85 },
-  ];
+      try {
+        const cases = await casesApi.getCases();
+        if (active) setRecentCases(cases.slice(0, 5));
+      } catch (err) {
+        console.warn('Failed to load recent cases:', err);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
 
-  return (
-    <div className="space-y-6">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-            {t('dashboard.title', 'Dashboard')}
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            {currentFarm.name} · {t('app.season', 'Season')}: Fall 2026 · {acreageLabel}
-          </p>
-        </div>
+    loadData();
 
-        <Link
-          to="/new-case"
-          className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-800 hover:bg-emerald-900 text-white shadow-sm transition"
-        >
-          <PlusCircle className="w-4 h-4 text-emerald-300" />
-          <span>+ {t('wizard.title', 'New Case')}</span>
-        </Link>
-      </div>
+    return () => {
+      active = false;
+    };
+  }, [role]);
 
-      {/* 4 Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title={t('dashboard.casesThisWeek', 'Cases This Week')}
-          value="108"
-          subtext={`+14% ${t('dashboard.vsLastMonth', 'vs last month')}`}
-          icon={<FileText className="w-5 h-5" />}
-        />
-        <StatCard
-          title={t('dashboard.avgConfidence', 'Avg. Confidence')}
-          value="82%"
-          subtext={`+3% ${t('dashboard.vsLastMonth', 'vs last month')}`}
-          icon={<TrendingUp className="w-5 h-5" />}
-        />
-        <StatCard
-          title={t('dashboard.pendingReview', 'Pending Review')}
-          value="7"
-          subtext="Requires agronomist action"
-          isPositive={false}
-          icon={<Clock className="w-5 h-5 text-amber-500" />}
-        />
-        <StatCard
-          title={t('dashboard.activeAgronomists', 'Active Agronomists')}
-          value="4"
-          subtext={`+1 ${t('dashboard.vsLastMonth', 'vs last month')}`}
-          icon={<Users className="w-5 h-5" />}
-        />
-      </div>
+  // ==========================================
+  // FARMER VIEW
+  // ==========================================
+  if (role === 'farmer') {
+    const openCases = summary?.open_cases ?? recentCases.filter((c) => c.status !== 'Resolved').length;
+    const awaitingReview = summary?.awaiting_review ?? recentCases.filter((c) => c.status === 'Review').length;
+    const latestAdvice = summary?.latest_decision ?? (recentCases.find((c) => c.status === 'Resolved')?.summary || 'No advice yet');
+    const unreadCount = summary?.unread_notifications ?? 0;
 
-      {/* Alert Banners */}
-      {alerts.length > 0 && (
-        <div className="space-y-2">
-          {alerts.map((alert) => {
-            let bgClass = 'bg-rose-50 border-rose-200 text-rose-900 dark:bg-rose-950/40 dark:border-rose-900 dark:text-rose-200';
-            let icon = <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />;
+    return (
+      <div className="space-y-6 pb-12">
+        {/* Welcome Banner */}
+        <div className="p-6 md:p-8 rounded-3xl bg-gradient-to-br from-emerald-800 to-emerald-950 text-white shadow-xl relative overflow-hidden">
+          <div className="relative z-10 max-w-xl">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-700/60 text-emerald-200 mb-3 backdrop-blur-sm">
+              <Sparkles className="w-3.5 h-3.5" />
+              {t('farmer.dashboardBadge', 'Field Advisory & Health Assistant')}
+            </span>
+            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
+              {t('farmer.welcome', 'Welcome back')}, {user?.displayName || 'Farmer'}!
+            </h1>
+            <p className="mt-2 text-sm text-emerald-100/90 leading-relaxed">
+              {t('farmer.heroText', 'Have a crop issue? Describe your crop symptom or record a voice note to get expert guidance.')}
+            </p>
 
-            if (alert.type === 'yellow') {
-              bgClass = 'bg-amber-50 border-amber-200 text-amber-900 dark:bg-amber-950/40 dark:border-amber-900 dark:text-amber-200';
-              icon = <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />;
-            } else if (alert.type === 'blue') {
-              bgClass = 'bg-sky-50 border-sky-200 text-sky-900 dark:bg-sky-950/40 dark:border-sky-900 dark:text-sky-200';
-              icon = <Info className="w-4 h-4 text-sky-600 flex-shrink-0" />;
-            } else if (alert.type === 'green') {
-              bgClass = 'bg-emerald-50 border-emerald-200 text-emerald-900 dark:bg-emerald-950/40 dark:border-emerald-900 dark:text-emerald-200';
-              icon = <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />;
-            }
-
-            return (
-              <div
-                key={alert.id}
-                className={`p-3 rounded-xl border flex items-center justify-between text-xs transition ${bgClass}`}
+            {/* Big Action Button */}
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Link
+                to="/new-case"
+                className="inline-flex items-center gap-3 px-6 py-4 rounded-2xl bg-white hover:bg-emerald-50 text-emerald-900 font-bold text-base shadow-lg transition-all transform hover:-translate-y-0.5 active:translate-y-0"
               >
-                <div className="flex items-center gap-2.5">
-                  {icon}
-                  <Link to={alert.link} className="hover:underline font-medium">
-                    {alert.message}
-                  </Link>
-                  <span className="text-[11px] opacity-70">· {alert.time}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => dismissAlert(alert.id)}
-                  className="opacity-50 hover:opacity-100 p-1 transition"
-                  title="Dismiss notification"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Charts (2 Column Grid) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left: Case Volume This Week */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-sm text-slate-900 dark:text-white">
-              {t('dashboard.caseVolume', 'Case Volume — This Week')}
-            </h3>
-            <div className="flex items-center gap-3 text-xs">
-              <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
-                <span className="w-2.5 h-2.5 rounded-sm bg-emerald-700" />
-                {t('dashboard.cases', 'Cases')}
-              </span>
-              <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
-                <span className="w-2.5 h-2.5 rounded-sm bg-slate-400" />
-                {t('dashboard.resolved', 'Resolved')}
-              </span>
+                <PlusCircle className="w-6 h-6 text-emerald-700" />
+                <span>{t('farmer.askQuestion', 'New Crop Inquiry')}</span>
+              </Link>
+              <Link
+                to="/cases"
+                className="inline-flex items-center gap-2 px-5 py-4 rounded-2xl bg-emerald-700/60 hover:bg-emerald-700 text-white font-semibold text-sm backdrop-blur-sm transition"
+              >
+                <span>{t('farmer.viewMyCases', 'My Cases')}</span>
+                <ArrowRight className="w-4 h-4" />
+              </Link>
             </div>
           </div>
-          <div className="h-56 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={volumeData} barGap={4}>
-                <XAxis dataKey="day" stroke="#94a3b8" fontSize={11} tickLine={false} />
-                <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#1e293b',
-                    borderColor: '#334155',
-                    borderRadius: '8px',
-                    fontSize: '11px',
-                    color: '#fff',
-                  }}
-                />
-                <Bar dataKey="cases" fill="#15803d" radius={[4, 4, 0, 0]} name="Cases" />
-                <Bar dataKey="resolved" fill="#94a3b8" radius={[4, 4, 0, 0]} name="Resolved" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
         </div>
 
-        {/* Right: Avg. Model Confidence 6 Months */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-sm text-slate-900 dark:text-white">
-              {t('dashboard.avgModelConfidence', 'Avg. Model Confidence — 6 Months')}
-            </h3>
-            <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
-              Current: 85%
+        {/* 4 Summary Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                {t('farmer.openCases', 'Open Cases')}
+              </span>
+              <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 flex items-center justify-center">
+                <Clock className="w-5 h-5" />
+              </div>
+            </div>
+            <div className="mt-3 text-3xl font-black text-slate-900 dark:text-white">
+              {openCases}
+            </div>
+            <span className="text-[11px] text-slate-400 mt-1">Currently in progress</span>
+          </div>
+
+          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                {t('farmer.waitingForExpert', 'With Expert')}
+              </span>
+              <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 flex items-center justify-center">
+                <Users className="w-5 h-5" />
+              </div>
+            </div>
+            <div className="mt-3 text-3xl font-black text-slate-900 dark:text-white">
+              {awaitingReview}
+            </div>
+            <span className="text-[11px] text-slate-400 mt-1">Awaiting agronomist review</span>
+          </div>
+
+          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                {t('farmer.latestAdvice', 'Latest Advice')}
+              </span>
+              <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 flex items-center justify-center">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+            </div>
+            <div className="mt-2 text-xs font-medium text-slate-700 dark:text-slate-300 line-clamp-2">
+              {latestAdvice}
+            </div>
+            <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold mt-1">
+              Agronomist verified
             </span>
           </div>
-          <div className="h-56 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={confidenceData}>
-                <defs>
-                  <linearGradient id="confidenceGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="month" stroke="#94a3b8" fontSize={11} tickLine={false} />
-                <YAxis domain={[50, 100]} stroke="#94a3b8" fontSize={11} tickLine={false} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#1e293b',
-                    borderColor: '#334155',
-                    borderRadius: '8px',
-                    fontSize: '11px',
-                    color: '#fff',
-                  }}
-                  formatter={(val: any) => [`${val}%`, 'Confidence']}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="confidence"
-                  stroke="#10b981"
-                  strokeWidth={2.5}
-                  fillOpacity={1}
-                  fill="url(#confidenceGradient)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+
+          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                {t('farmer.notifications', 'Notifications')}
+              </span>
+              <div className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 flex items-center justify-center">
+                <Bell className="w-5 h-5" />
+              </div>
+            </div>
+            <div className="mt-3 text-3xl font-black text-slate-900 dark:text-white">
+              {unreadCount}
+            </div>
+            <Link
+              to="/notifications"
+              className="text-[11px] text-emerald-700 dark:text-emerald-400 font-semibold mt-1 hover:underline inline-flex items-center gap-1"
+            >
+              <span>View alerts</span>
+              <ArrowRight className="w-3 h-3" />
+            </Link>
           </div>
         </div>
-      </div>
 
-      {/* Recent Cases Table */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden">
-        <div className="p-5 flex items-center justify-between border-b border-slate-100 dark:border-slate-800">
-          <div>
-            <h3 className="font-semibold text-sm text-slate-900 dark:text-white">
-              {t('dashboard.recentCases', 'Recent Cases')}
+        {/* Recent Cases List */}
+        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+              {t('farmer.recentInquiries', 'Recent Crop Cases')}
             </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Live automated and reviewed field issues
+            <Link
+              to="/cases"
+              className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-1"
+            >
+              <span>{t('common.viewAll', 'View All')}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          {recentCases.length === 0 ? (
+            <div className="text-center py-8 text-xs text-slate-400">
+              No cases submitted yet. Tap "New Crop Inquiry" above to start!
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {recentCases.map((c) => (
+                <div
+                  key={c.id}
+                  onClick={() => navigate(`/cases/${c.id}`)}
+                  className="py-3.5 flex items-center justify-between cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 px-2 rounded-xl transition"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 flex items-center justify-center font-bold text-xs">
+                      {c.crop ? c.crop.slice(0, 2).toUpperCase() : 'CP'}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-slate-900 dark:text-white">
+                          {c.crop}
+                        </span>
+                        <span className="text-xs text-slate-400 font-mono">
+                          {c.caseNumber}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1 max-w-md">
+                        {c.summary || c.issue}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <StatusBadge status={c.rawStatus || c.status} size="sm" />
+                    <ChevronRight className="w-4 h-4 text-slate-300" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // AGRONOMIST VIEW
+  // ==========================================
+  if (role === 'agronomist') {
+    const pendingInQueue = summary?.pending_in_queue ?? 0;
+    const highRisk = summary?.high_risk ?? 0;
+    const reviewedThisWeek = summary?.reviewed_this_week ?? 0;
+    const avgResponseTime = summary?.avg_response_time ?? '2.4 hrs';
+
+    return (
+      <div className="space-y-6 pb-12">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-200 dark:border-slate-800">
+          <div>
+            <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+              Agronomist Review Command
+            </h1>
+            <p className="text-xs text-slate-500 mt-1">
+              Field diagnostic validation queue and expert triage
             </p>
           </div>
           <Link
-            to="/cases"
-            className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:underline flex items-center gap-1"
+            to="/review-queue"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs shadow transition"
           >
-            <span>{t('dashboard.viewAll', 'View all')}</span>
-            <ArrowRight className="w-3.5 h-3.5" />
+            <span>Open Review Queue</span>
+            <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[11px] font-semibold">
-              <tr>
-                <th className="py-3 px-4">Case ID</th>
-                <th className="py-3 px-4">Crop</th>
-                <th className="py-3 px-4">Issue</th>
-                <th className="py-3 px-4">Farm</th>
-                <th className="py-3 px-4">Confidence</th>
-                <th className="py-3 px-4">Uncertainty</th>
-                <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4">Time</th>
-                <th className="py-3 px-4 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
-              {mockCases.map((c) => (
-                <tr
+        {/* 4 Metric Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              Pending in Queue
+            </span>
+            <div className="mt-2 text-3xl font-extrabold text-slate-900 dark:text-white">
+              {pendingInQueue}
+            </div>
+            <span className="text-[11px] text-emerald-600 font-medium">Assigned to you</span>
+          </div>
+
+          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              High Risk Flagged
+            </span>
+            <div className="mt-2 text-3xl font-extrabold text-amber-600 dark:text-amber-400">
+              {highRisk}
+            </div>
+            <span className="text-[11px] text-slate-400">Priority triage needed</span>
+          </div>
+
+          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              Reviewed This Week
+            </span>
+            <div className="mt-2 text-3xl font-extrabold text-emerald-700 dark:text-emerald-400">
+              {reviewedThisWeek}
+            </div>
+            <span className="text-[11px] text-slate-400">Decisions finalized</span>
+          </div>
+
+          <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              Avg Response Time
+            </span>
+            <div className="mt-2 text-3xl font-extrabold text-blue-600 dark:text-blue-400">
+              {avgResponseTime}
+            </div>
+            <span className="text-[11px] text-slate-400">Target &lt; 24h</span>
+          </div>
+        </div>
+
+        {/* Queue Preview */}
+        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+              Assigned Cases Awaiting Your Review
+            </h3>
+            <Link
+              to="/review-queue"
+              className="text-xs font-semibold text-emerald-700 hover:underline flex items-center gap-1"
+            >
+              <span>Go to Queue</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {recentCases
+              .filter((c) => c.status === 'Review' || c.status === 'Flagged')
+              .map((c) => (
+                <div
                   key={c.id}
                   onClick={() => navigate(`/cases/${c.id}`)}
-                  className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 cursor-pointer transition"
+                  className="py-3 flex items-center justify-between cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 px-2 rounded-xl transition"
                 >
-                  <td className="py-3.5 px-4 font-mono font-semibold text-emerald-800 dark:text-emerald-400">
-                    {c.caseNumber}
-                  </td>
-                  <td className="py-3.5 px-4 font-medium text-slate-900 dark:text-white">
-                    {c.crop}
-                  </td>
-                  <td className="py-3.5 px-4 max-w-xs truncate">{c.issue}</td>
-                  <td className="py-3.5 px-4 text-slate-500 dark:text-slate-400">{c.farmName}</td>
-                  <td className="py-3.5 px-4 font-semibold">
-                    <span className="text-slate-900 dark:text-white">{c.confidence}%</span>
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <UncertaintyBadge confidence={c.confidence} size="sm" />
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <span
-                      className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                        c.status === 'Resolved'
-                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                          : c.status === 'Review'
-                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                          : c.status === 'Flagged'
-                          ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                          : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
-                      }`}
-                    >
-                      {c.status}
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-xs font-bold text-slate-800 dark:text-slate-200">
+                      {c.caseNumber}
                     </span>
-                  </td>
-                  <td className="py-3.5 px-4 text-slate-400 whitespace-nowrap">{c.time}</td>
-                  <td className="py-3.5 px-4 text-right">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/cases/${c.id}`);
-                      }}
-                      className="p-1 rounded text-slate-400 hover:text-emerald-600 transition"
-                      title="Inspect case"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
+                    <span className="text-xs text-slate-600 dark:text-slate-300 font-medium">
+                      {c.crop} · {c.fieldName}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <StatusBadge status={c.rawStatus || c.status} size="sm" />
+                    <ChevronRight className="w-4 h-4 text-slate-300" />
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
+          </div>
         </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // ADMIN VIEW
+  // ==========================================
+  const totalCases = summary?.total_cases ?? 0;
+  const unassigned = summary?.unassigned ?? 0;
+  const pendingCases = summary?.pending ?? 0;
+  const agronomistsAvail = summary?.agronomists_available ?? 0;
+  const avgRating = summary?.avg_rating ? summary.avg_rating.toFixed(1) : '4.8';
+
+  return (
+    <div className="space-y-6 pb-12">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-200 dark:border-slate-800">
+        <div>
+          <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+            System Administration
+          </h1>
+          <p className="text-xs text-slate-500 mt-1">
+            Operational workload, case distribution, and communication oversight
+          </p>
+        </div>
+      </div>
+
+      {/* 5 Admin Metric Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+          <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+            Total Cases
+          </span>
+          <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{totalCases}</div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+          <span className="text-[11px] font-semibold text-amber-600 uppercase tracking-wider">
+            Unassigned Pool
+          </span>
+          <div className="mt-2 text-2xl font-black text-amber-600">{unassigned}</div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+          <span className="text-[11px] font-semibold text-indigo-600 uppercase tracking-wider">
+            Pending Review
+          </span>
+          <div className="mt-2 text-2xl font-black text-indigo-600">{pendingCases}</div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+          <span className="text-[11px] font-semibold text-emerald-600 uppercase tracking-wider">
+            Available Experts
+          </span>
+          <div className="mt-2 text-2xl font-black text-emerald-600">{agronomistsAvail}</div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+          <span className="text-[11px] font-semibold text-amber-500 uppercase tracking-wider">
+            Avg Farmer Rating
+          </span>
+          <div className="mt-2 text-2xl font-black text-amber-500 flex items-center gap-1">
+            <span>{avgRating}</span>
+            <Star className="w-4 h-4 fill-amber-500" />
+          </div>
+        </div>
+      </div>
+
+      {/* Admin Quick Action Hub */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Link
+          to="/admin/agronomists"
+          className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-600 shadow-sm transition group"
+        >
+          <Users className="w-6 h-6 text-emerald-700 dark:text-emerald-400 mb-3" />
+          <h4 className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-emerald-700 transition">
+            Manage Agronomists
+          </h4>
+          <p className="text-xs text-slate-500 mt-1">
+            View workload, toggle availability, edit capacity limits
+          </p>
+        </Link>
+
+        <Link
+          to="/admin/cases"
+          className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-600 shadow-sm transition group"
+        >
+          <Clock className="w-6 h-6 text-indigo-600 dark:text-indigo-400 mb-3" />
+          <h4 className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-emerald-700 transition">
+            All Cases & Triage
+          </h4>
+          <p className="text-xs text-slate-500 mt-1">
+            Filter unassigned cases, reassign agronomists, view logs
+          </p>
+        </Link>
+
+        <Link
+          to="/admin/communications"
+          className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-600 shadow-sm transition group"
+        >
+          <MessageSquare className="w-6 h-6 text-purple-600 dark:text-purple-400 mb-3" />
+          <h4 className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-emerald-700 transition">
+            Communication Logs
+          </h4>
+          <p className="text-xs text-slate-500 mt-1">
+            Read translated message transcripts and export CSV
+          </p>
+        </Link>
+
+        <Link
+          to="/admin/feedback"
+          className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-600 shadow-sm transition group"
+        >
+          <Star className="w-6 h-6 text-amber-500 dark:text-amber-400 mb-3" />
+          <h4 className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-emerald-700 transition">
+            Farmer Feedback
+          </h4>
+          <p className="text-xs text-slate-500 mt-1">
+            Review 1-5 star ratings, feedback audio, and agronomist averages
+          </p>
+        </Link>
       </div>
     </div>
   );

@@ -8,12 +8,16 @@ import {
   Globe, 
   ShieldCheck, 
   Download, 
-  AlertTriangle 
+  AlertTriangle,
+  Lock,
+  UserCheck
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '@/store/useAppStore';
 import { units, type UnitSystem } from '@/lib/units';
 import { farmsApi } from '@/api/farmsApi';
+import { authApi } from '@/api/authApi';
+import { auth, updatePassword } from '@/lib/firebase';
 
 export const Settings: React.FC = () => {
   const { t } = useTranslation();
@@ -26,7 +30,13 @@ export const Settings: React.FC = () => {
     setUnitSystem,
     language,
     setLanguage,
+    user,
   } = useAppStore();
+
+  const [available, setAvailable] = useState(true);
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
+  const [updatingPassword, setUpdatingPassword] = useState(false);
 
   const [farmName, setFarmName] = useState(currentFarm.name);
   const [operator, setOperator] = useState(currentFarm.operator);
@@ -388,7 +398,11 @@ export const Settings: React.FC = () => {
             </label>
             <select
               value={language}
-              onChange={(e) => setLanguage(e.target.value as any)}
+              onChange={(e) => {
+                const newLang = e.target.value as 'en' | 'hi' | 'kn';
+                setLanguage(newLang);
+                authApi.updateLanguage(newLang).catch(console.warn);
+              }}
               className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white p-2.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
             >
               <option value="en">English (US)</option>
@@ -400,6 +414,96 @@ export const Settings: React.FC = () => {
             </p>
           </div>
         </div>
+      </div>
+
+      {/* SECTION: AGRONOMIST AVAILABILITY */}
+      {(user?.role === 'agronomist' || user?.role === 'admin') && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-sm space-y-4">
+          <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider pb-3 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2">
+            <UserCheck className="w-4 h-4 text-emerald-600" />
+            <span>Case Assignment Availability</span>
+          </h3>
+          <div className="flex items-center justify-between text-xs">
+            <div>
+              <span className="font-semibold text-slate-900 dark:text-white block">
+                Available for New Cases
+              </span>
+              <span className="text-[11px] text-slate-400">
+                When enabled, the automated triage engine assigns pending farmer cases to you.
+              </span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={available}
+                onChange={(e) => {
+                  const val = e.target.checked;
+                  setAvailable(val);
+                  authApi.updateAvailability(val).catch(console.warn);
+                }}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-700"></div>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION: CHANGE PASSWORD */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-sm space-y-4">
+        <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider pb-3 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2">
+          <Lock className="w-4 h-4 text-emerald-600" />
+          <span>Security & Password</span>
+        </h3>
+
+        {passwordMsg && (
+          <div className="p-3 rounded-lg text-xs bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200">
+            {passwordMsg}
+          </div>
+        )}
+
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!newPassword || newPassword.length < 6) {
+              setPasswordMsg('Password must be at least 6 characters.');
+              return;
+            }
+            if (auth?.currentUser) {
+              setUpdatingPassword(true);
+              try {
+                await updatePassword(auth.currentUser, newPassword);
+                setPasswordMsg('Password updated successfully!');
+                setNewPassword('');
+              } catch (err: any) {
+                setPasswordMsg(err.message || 'Failed to update password');
+              } finally {
+                setUpdatingPassword(false);
+              }
+            }
+          }}
+          className="space-y-3 max-w-sm text-xs"
+        >
+          <div>
+            <label className="block text-slate-600 dark:text-slate-400 mb-1 font-medium">
+              New Password (min 6 characters)
+            </label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white p-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-700"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={updatingPassword || !newPassword}
+            className="px-4 py-2 rounded-lg bg-emerald-800 hover:bg-emerald-900 text-white font-semibold shadow disabled:opacity-50 transition"
+          >
+            {updatingPassword ? 'Updating...' : 'Change Password'}
+          </button>
+        </form>
       </div>
 
       {/* SECTION 4: NOTIFICATIONS */}

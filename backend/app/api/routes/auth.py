@@ -158,3 +158,42 @@ def get_me(current_user: User = Depends(get_current_user)):
     Returns the profile and assigned role of the currently authenticated user.
     """
     return current_user
+
+
+@router.patch("/me/availability", response_model=UserMe)
+@me_router.patch("/me/availability", response_model=UserMe)
+def update_availability(
+    payload: AvailabilityUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Updates the availability flag of the current user (e.g. agronomist toggling queue availability).
+    """
+    current_user.available = payload.available
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+@router.patch("/me/language", response_model=UserMe)
+@me_router.patch("/me/language", response_model=UserMe)
+def update_language(
+    payload: LanguageUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Updates the preferred language of the current user.
+    """
+    lang = payload.language.lower()
+    if lang not in ("en", "hi", "kn"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Language must be one of: en, hi, kn",
+        )
+    current_user.language = lang
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+

@@ -12,14 +12,28 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./agriadvisor.db"
     
     # AI Engine
-    AI_MODE: str = "mock"  # "mock" or "openai"
+    AI_MODE: str = "mock"  # "mock" or "gemini"
     OPENAI_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash-lite"
+    GEMINI_MAX_RPM: int = 8
+    
+    # Case Assignment
+    DEFAULT_MAX_OPEN_CASES: int = 5
+    ASSIGN_TIMEOUT_MINUTES: int = 1440
     
     # Firebase & Auth
     FIREBASE_PROJECT_ID: str = "agriadvisor-ai"
     FIREBASE_CREDENTIALS_PATH: str = ""
     GOOGLE_APPLICATION_CREDENTIALS: str = "./secrets/firebase-admin.json"
     AUTH_EMAIL_DOMAIN: str = "agriadvisor.app"
+
+    # Notifications & SMTP
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    EMAIL_FROM: str = ""
     
     # File Storage
     UPLOAD_DIR: str = "./uploads"

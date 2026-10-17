@@ -1,184 +1,238 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Search, 
-  Filter, 
-  ExternalLink, 
-  Download, 
-  History, 
-  CheckCircle2, 
-  Clock, 
-  AlertTriangle 
+import {
+  Search,
+  Filter,
+  History,
+  User,
+  Clock,
+  ChevronRight,
+  Calendar,
+  Star,
+  Sprout,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useAppStore } from '@/store/useAppStore';
 import { casesApi } from '@/api/casesApi';
 import { type CaseItem } from '@/mocks/data';
-import { UncertaintyBadge } from '@/components/UncertaintyBadge';
+import { StatusBadge } from '@/components/StatusBadge';
+import { EmptyState } from '@/components/EmptyState';
 
 export const CaseHistory: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { user } = useAppStore();
+
   const [cases, setCases] = useState<CaseItem[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [loading, setLoading] = useState(true);
 
+  const role = user?.role || 'farmer';
+
   useEffect(() => {
-    casesApi.getCases().then((data) => {
-      setCases(data);
-      setLoading(false);
-    });
+    let active = true;
+
+    async function loadCases() {
+      setLoading(true);
+      try {
+        const data = await casesApi.getCases();
+        if (active) setCases(data);
+      } catch (err) {
+        console.warn('Failed to load cases:', err);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadCases();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const filteredCases = cases.filter((c) => {
+    const q = search.toLowerCase();
     const matchesSearch =
-      c.caseNumber.toLowerCase().includes(search.toLowerCase()) ||
-      c.crop.toLowerCase().includes(search.toLowerCase()) ||
-      c.issue.toLowerCase().includes(search.toLowerCase()) ||
-      c.farmName.toLowerCase().includes(search.toLowerCase());
+      c.caseNumber.toLowerCase().includes(q) ||
+      c.crop.toLowerCase().includes(q) ||
+      (c.issue || '').toLowerCase().includes(q) ||
+      (c.operator || '').toLowerCase().includes(q) ||
+      (c.farmName || '').toLowerCase().includes(q);
 
-    const matchesStatus = statusFilter === 'All' || c.status === statusFilter;
+    let matchesStatus = true;
+    if (statusFilter === 'Resolved') {
+      matchesStatus = c.status === 'Resolved';
+    } else if (statusFilter === 'Review') {
+      matchesStatus = c.status === 'Review' || c.status === 'Draft';
+    } else if (statusFilter === 'Flagged') {
+      matchesStatus = c.status === 'Flagged';
+    }
+
     return matchesSearch && matchesStatus;
   });
 
+  // Group cases by farmer for Agronomist view
+  const groupedByFarmer = filteredCases.reduce((acc, curr) => {
+    const farmerKey = curr.operator || 'Farmer';
+    if (!acc[farmerKey]) {
+      acc[farmerKey] = [];
+    }
+    acc[farmerKey].push(curr);
+    return acc;
+  }, {} as Record<string, CaseItem[]>);
+
   return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-10">
+    <div className="space-y-6 max-w-5xl mx-auto pb-16">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-            {t('nav.caseHistory', 'Case History')}
+          <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+            <History className="w-6 h-6 text-emerald-700" />
+            <span>{role === 'farmer' ? t('nav.myCases', 'My Cases') : t('nav.caseHistory', 'Case History')}</span>
           </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Historical diagnostic investigations, agronomist reviews, and field treatment records.
+          <p className="text-xs text-slate-500 mt-1">
+            {role === 'farmer'
+              ? 'Past field inquiries and expert decisions'
+              : 'Past cases grouped by farmer with full review conversations'}
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            const blob = new Blob([JSON.stringify(filteredCases, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'case_history_export.json';
-            a.click();
-          }}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 shadow-sm transition"
-        >
-          <Download className="w-3.5 h-3.5" />
-          <span>Export Cases</span>
-        </button>
+        {/* Search & Filter Bar */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search crop, farmer, ID..."
+              className="text-xs pl-9 pr-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-700"
+            />
+          </div>
+
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="text-xs px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none"
+          >
+            <option value="All">All Statuses</option>
+            <option value="Review">With Expert / In Progress</option>
+            <option value="Resolved">Decided / Approved</option>
+            <option value="Flagged">High Risk / Blocked</option>
+          </select>
+        </div>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm flex flex-col sm:flex-row items-center gap-3">
-        <div className="relative flex-1 w-full">
-          <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by Case ID, crop, issue, or farm name..."
-            className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white pl-9 pr-3 py-2.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-          />
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-16 gap-3">
+          <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs text-slate-500">Loading cases...</span>
         </div>
-
-        {/* Status Pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto">
-          {['All', 'Resolved', 'Review', 'Flagged', 'Agronomist'].map((st) => (
-            <button
-              key={st}
-              type="button"
-              onClick={() => setStatusFilter(st)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition ${
-                statusFilter === st
-                  ? 'bg-emerald-800 text-white shadow-sm'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-              }`}
+      ) : filteredCases.length === 0 ? (
+        <EmptyState
+          icon={History}
+          title="No cases found"
+          description="No inquiry records matched your filters."
+        />
+      ) : role === 'agronomist' ? (
+        /* AGRONOMIST GROUPED BY FARMER VIEW */
+        <div className="space-y-6">
+          {Object.entries(groupedByFarmer).map(([farmerName, farmerCases]) => (
+            <div
+              key={farmerName}
+              className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3"
             >
-              {st}
-            </button>
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-full bg-emerald-800 text-white flex items-center justify-center font-bold text-xs">
+                    {farmerName.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                      {farmerName}
+                    </h3>
+                    <span className="text-[11px] text-slate-400">
+                      {farmerCases.length} case{farmerCases.length > 1 ? 's' : ''} on record
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {farmerCases.map((c) => (
+                  <div
+                    key={c.id}
+                    onClick={() => navigate(`/cases/${c.id}`)}
+                    className="py-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 px-2 rounded-xl transition cursor-pointer"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-bold text-slate-900 dark:text-white">
+                          {c.caseNumber}
+                        </span>
+                        <span className="text-xs font-medium text-slate-800 dark:text-slate-200">
+                          {c.crop}
+                        </span>
+                        <StatusBadge status={c.rawStatus || c.status} size="sm" />
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1 line-clamp-1 max-w-lg">
+                        {c.description || c.summary || c.issue}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <span className="text-[11px] text-slate-400">
+                        {new Date(c.createdAt).toLocaleDateString()}
+                      </span>
+                      <ChevronRight className="w-4 h-4 text-slate-300" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
-      </div>
-
-      {/* Cases Table */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 uppercase tracking-wider text-[11px] font-semibold border-b border-slate-100 dark:border-slate-800">
-              <tr>
-                <th className="py-3 px-4">Case ID</th>
-                <th className="py-3 px-4">Crop</th>
-                <th className="py-3 px-4">Issue</th>
-                <th className="py-3 px-4">Farm & Field</th>
-                <th className="py-3 px-4">Confidence</th>
-                <th className="py-3 px-4">Uncertainty</th>
-                <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4">Time</th>
-                <th className="py-3 px-4 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
-              {filteredCases.map((c) => (
-                <tr
-                  key={c.id}
-                  onClick={() => navigate(`/cases/${c.id}`)}
-                  className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 cursor-pointer transition"
-                >
-                  <td className="py-3.5 px-4 font-mono font-semibold text-emerald-800 dark:text-emerald-400">
-                    {c.caseNumber}
-                  </td>
-                  <td className="py-3.5 px-4 font-medium text-slate-900 dark:text-white">
-                    {c.crop}
-                  </td>
-                  <td className="py-3.5 px-4 max-w-xs truncate">{c.issue}</td>
-                  <td className="py-3.5 px-4">
-                    <div className="text-slate-900 dark:text-white font-medium">{c.farmName}</div>
-                    <div className="text-[10px] text-slate-400">{c.fieldName}</div>
-                  </td>
-                  <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-white">
-                    {c.confidence}%
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <UncertaintyBadge confidence={c.confidence} size="sm" />
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <span
-                      className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                        c.status === 'Resolved'
-                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                          : c.status === 'Review'
-                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                          : c.status === 'Flagged'
-                          ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                          : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
-                      }`}
-                    >
-                      {c.status}
+      ) : (
+        /* FARMER SIMPLE LIST VIEW (No technical terms or confidence %) */
+        <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm divide-y divide-slate-100 dark:divide-slate-800">
+          {filteredCases.map((c) => (
+            <div
+              key={c.id}
+              onClick={() => navigate(`/cases/${c.id}`)}
+              className="py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/50 px-2 rounded-xl transition cursor-pointer"
+            >
+              <div className="flex items-center gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-800 text-white flex items-center justify-center font-bold text-xs shadow-sm">
+                  {c.crop ? c.crop.slice(0, 2).toUpperCase() : 'CP'}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm text-slate-900 dark:text-white">
+                      {c.crop}
                     </span>
-                  </td>
-                  <td className="py-3.5 px-4 text-slate-400 whitespace-nowrap">{c.time}</td>
-                  <td className="py-3.5 px-4 text-right">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/cases/${c.id}`);
-                      }}
-                      className="p-1 rounded text-slate-400 hover:text-emerald-600 transition"
-                      title="Inspect case"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    <span className="text-xs font-mono text-slate-400">
+                      {c.caseNumber}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5 line-clamp-1 max-w-md">
+                    {c.description || c.summary || c.issue}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <StatusBadge status={c.rawStatus || c.status} size="sm" />
+                <span className="text-[11px] text-slate-400 hidden sm:inline">
+                  {new Date(c.createdAt).toLocaleDateString()}
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-300" />
+              </div>
+            </div>
+          ))}
         </div>
-      </div>
+      )}
     </div>
   );
 };

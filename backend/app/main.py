@@ -8,8 +8,19 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.database import Base, engine, SessionLocal
-from app.api.routes import auth, admin, farms, cases, reviews, prompts, notifications, eval
+from app.api.routes import (
+    auth,
+    admin,
+    farms,
+    cases,
+    reviews,
+    prompts,
+    notifications,
+    eval,
+    dashboard,
+)
 from app.scripts.seed import seed_database
+from app.services.assignment import check_case_assignment_timeouts
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("agriadvisor.api")
@@ -41,7 +52,36 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # Timeout Job: APScheduler every 5 minutes
+    scheduler = None
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+
+        def timeout_job():
+            job_db = SessionLocal()
+            try:
+                check_case_assignment_timeouts(job_db)
+            except Exception as e:
+                logger.error(f"Error executing timeout job: {e}")
+            finally:
+                job_db.close()
+
+        scheduler = BackgroundScheduler()
+        scheduler.add_job(timeout_job, "interval", minutes=5)
+        scheduler.start()
+        logger.info("Started APScheduler assignment timeout job (5-minute interval).")
+    except Exception as e:
+        logger.warning(f"Failed to start APScheduler: {e}")
+
     yield
+
+    if scheduler:
+        try:
+            scheduler.shutdown(wait=False)
+            logger.info("Shutdown APScheduler assignment timeout job.")
+        except Exception:
+            pass
+
     logger.info("Shutting down AgriAdvisor AI backend...")
 
 
@@ -84,10 +124,14 @@ app.include_router(admin.router, prefix=api_prefix)
 app.include_router(admin.router)
 app.include_router(farms.router, prefix=api_prefix)
 app.include_router(cases.router, prefix=api_prefix)
+app.include_router(cases.router)
 app.include_router(reviews.router, prefix=api_prefix)
+app.include_router(reviews.router)
 app.include_router(prompts.router, prefix=api_prefix)
 app.include_router(notifications.router, prefix=api_prefix)
 app.include_router(eval.router, prefix=api_prefix)
+app.include_router(dashboard.router, prefix=api_prefix)
+app.include_router(dashboard.router)
 
 
 @app.get("/health", tags=["Health"])

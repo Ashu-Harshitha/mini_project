@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { 
   Users, 
   Plus, 
@@ -9,7 +10,8 @@ import {
   X, 
   Check, 
   AlertTriangle,
-  UserPlus
+  UserPlus,
+  Star
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { adminApi, type AdminUser, type CreateAgronomistPayload } from '@/api/adminApi';
@@ -17,11 +19,13 @@ import { useAppStore } from '@/store/useAppStore';
 
 export const ManageUsers: React.FC = () => {
   const { t } = useTranslation();
+  const location = useLocation();
+  const isAgronomistsPage = location.pathname.includes('agronomists');
   const { user: currentAdmin } = useAppStore();
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
-  const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [roleFilter, setRoleFilter] = useState<string>(isAgronomistsPage ? 'agronomist' : 'all');
   const [searchQuery, setSearchQuery] = useState('');
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -48,12 +52,59 @@ export const ManageUsers: React.FC = () => {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const data = await adminApi.getUsers(roleFilter === 'all' ? undefined : roleFilter);
-      setUsers(data);
+      if (roleFilter === 'agronomist') {
+        const agros = await adminApi.getAgronomists();
+        setUsers(
+          agros.map((a) => ({
+            id: a.id,
+            username: a.username,
+            full_name: a.name,
+            role: 'agronomist',
+            language: 'en',
+            email: null,
+            phone: null,
+            active: true,
+            available: a.available,
+            max_open_cases: a.max_open_cases,
+            open_count: a.open_count,
+            total_reviewed: a.total_reviewed,
+            avg_rating: a.avg_rating,
+            created_at: new Date().toISOString(),
+            created_by: null,
+          } as any))
+        );
+      } else {
+        const data = await adminApi.getUsers(roleFilter === 'all' ? undefined : roleFilter);
+        setUsers(data);
+      }
     } catch (err: any) {
       showToast('error', err?.message || 'Failed to load users');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleToggleAvailable = async (id: number, currentAvailable: boolean) => {
+    try {
+      await adminApi.updateAgronomist(id, { available: !currentAvailable });
+      setUsers((prev) =>
+        prev.map((u: any) => (u.id === id ? { ...u, available: !currentAvailable } : u))
+      );
+      showToast('success', 'Availability updated');
+    } catch (err: any) {
+      showToast('error', err.message || 'Update failed');
+    }
+  };
+
+  const handleUpdateCapacity = async (id: number, maxCases: number) => {
+    try {
+      await adminApi.updateAgronomist(id, { max_open_cases: maxCases });
+      setUsers((prev) =>
+        prev.map((u: any) => (u.id === id ? { ...u, max_open_cases: maxCases } : u))
+      );
+      showToast('success', 'Max cases limit updated');
+    } catch (err: any) {
+      showToast('error', err.message || 'Update failed');
     }
   };
 
@@ -250,34 +301,125 @@ export const ManageUsers: React.FC = () => {
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              <tr>
-                <th className="px-4 py-3.5">User</th>
-                <th className="px-4 py-3.5">Username</th>
-                <th className="px-4 py-3.5">Role</th>
-                <th className="px-4 py-3.5">Language</th>
-                <th className="px-4 py-3.5">Created</th>
-                <th className="px-4 py-3.5 text-right">Actions</th>
-              </tr>
+              {roleFilter === 'agronomist' ? (
+                <tr>
+                  <th className="px-4 py-3.5">Agronomist</th>
+                  <th className="px-4 py-3.5">Username</th>
+                  <th className="px-4 py-3.5">Available</th>
+                  <th className="px-4 py-3.5">Open Cases / Max</th>
+                  <th className="px-4 py-3.5">Reviewed</th>
+                  <th className="px-4 py-3.5">Avg Rating</th>
+                  <th className="px-4 py-3.5 text-right">Actions</th>
+                </tr>
+              ) : (
+                <tr>
+                  <th className="px-4 py-3.5">User</th>
+                  <th className="px-4 py-3.5">Username</th>
+                  <th className="px-4 py-3.5">Role</th>
+                  <th className="px-4 py-3.5">Language</th>
+                  <th className="px-4 py-3.5">Created</th>
+                  <th className="px-4 py-3.5 text-right">Actions</th>
+                </tr>
+              )}
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                     <div className="flex items-center justify-center gap-2">
                       <div className="w-4 h-4 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
-                      <span>Loading user accounts...</span>
+                      <span>Loading accounts...</span>
                     </div>
                   </td>
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
                     No users found matching your search.
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map((u) => {
+                filteredUsers.map((u: any) => {
                   const isAdminRow = u.role === 'admin';
+                  if (roleFilter === 'agronomist') {
+                    return (
+                      <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                        <td className="px-4 py-3.5">
+                          <div className="font-semibold text-slate-900 dark:text-white">
+                            {u.full_name || u.username}
+                          </div>
+                          <div className="text-[11px] text-slate-400">
+                            {u.email || u.phone || 'Agronomist'}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5 font-mono text-[11px] text-slate-600 dark:text-slate-400">
+                          {u.username}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={u.available !== false}
+                              onChange={() => handleToggleAvailable(u.id, u.available !== false)}
+                              className="sr-only peer"
+                            />
+                            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-700"></div>
+                          </label>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <div className="inline-flex items-center gap-1.5 font-semibold text-xs">
+                            <span className="font-mono text-emerald-700 dark:text-emerald-400 font-bold">{u.open_count ?? 0}</span>
+                            <span className="text-slate-400">/</span>
+                            <input
+                              type="number"
+                              min={1}
+                              max={20}
+                              defaultValue={u.max_open_cases ?? 5}
+                              onBlur={(e) => {
+                                const val = parseInt(e.target.value, 10);
+                                if (!isNaN(val) && val > 0) handleUpdateCapacity(u.id, val);
+                              }}
+                              className="w-12 px-1.5 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-center font-mono text-xs focus:ring-1 focus:ring-emerald-600"
+                            />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5 font-mono font-medium text-xs">
+                          {u.total_reviewed ?? 0}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <div className="inline-flex items-center gap-1 font-bold text-xs text-amber-500">
+                            <span>{u.avg_rating ? Number(u.avg_rating).toFixed(1) : '5.0'}</span>
+                            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              title="Reset password"
+                              onClick={() => {
+                                setResetError(null);
+                                setNewResetPassword('');
+                                setResetTargetUser(u);
+                              }}
+                              className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition"
+                            >
+                              <KeyRound className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                            </button>
+                            <button
+                              type="button"
+                              title="Delete agronomist"
+                              onClick={() => setDeleteTargetUser(u)}
+                              className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-600 dark:text-slate-300 hover:text-rose-600 transition"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+
                   return (
                     <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
                       <td className="px-4 py-3.5">

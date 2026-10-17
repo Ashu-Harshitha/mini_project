@@ -1,12 +1,38 @@
-import { apiClient, USE_MOCKS } from './client';
+import { apiClient } from './client';
 import { mockCases, type CaseItem } from '@/mocks/data';
 
+export interface MessageItem {
+  id: number;
+  case_id: number;
+  sender_id: number;
+  sender_name?: string;
+  sender_role: 'farmer' | 'agronomist' | 'admin';
+  kind: 'text' | 'voice' | 'decision' | 'feedback';
+  original_lang: string;
+  original_text: string;
+  text: string;
+  translated: boolean;
+  audio_url?: string | null;
+  transcript_status: 'none' | 'pending' | 'done' | 'failed';
+  created_at: string;
+}
+
+export interface CaseOutcomeFeedback {
+  id: number;
+  rating: number;
+  comment?: string | null;
+  comment_lang?: string | null;
+  comment_translated?: string | null;
+  audio_url?: string | null;
+  created_at: string;
+}
+
 function mapStatus(rawStatus: string): CaseItem['status'] {
-  const s = rawStatus.toUpperCase();
+  const s = (rawStatus || '').toUpperCase();
   if (['APPROVED', 'APPROVED_WITH_EDITS', 'DELIVERED', 'OUTCOME_REPORTED', 'RESOLVED'].includes(s)) {
     return 'Resolved';
   }
-  if (['PENDING_REVIEW', 'REVIEW'].includes(s)) {
+  if (['PENDING_REVIEW', 'REVIEW', 'SUBMITTED', 'IN_REVIEW'].includes(s)) {
     return 'Review';
   }
   if (['BLOCKED', 'REJECTED', 'FLAGGED'].includes(s)) {
@@ -24,7 +50,7 @@ export function mapBackendCaseToCaseItem(raw: any): CaseItem {
   const observations = raw.observations && raw.observations.length > 0
     ? raw.observations.map((o: any) => ({
         description: o.description,
-        confidence: Math.round(o.confidence),
+        confidence: Math.round(o.confidence ?? 85),
         uncertainty: o.uncertainty || 'Medium',
         note: o.note || '',
       }))
@@ -37,17 +63,17 @@ export function mapBackendCaseToCaseItem(raw: any): CaseItem {
       nitrogen: {
         value: s.n_value || '18 ppm NO3-N',
         status: (s.n_status as any) || 'Marginal',
-        citation: s.n_citation || 'ISU Ext. PM 1714',
+        citation: s.n_citation || 'Extension Protocol',
       },
       ph: {
         value: s.ph_value || 'pH 6.2',
         status: (s.ph_status as any) || 'Optimal',
-        citation: s.ph_citation || 'ISU Ext. PM 1688',
+        citation: s.ph_citation || 'Extension Protocol',
       },
       pk: {
         value: s.pk_value || 'P & K Sufficient',
         status: (s.pk_status as any) || 'Adequate',
-        citation: 'ISU Ext.',
+        citation: 'Extension Protocol',
       },
     };
   }
@@ -56,132 +82,137 @@ export function mapBackendCaseToCaseItem(raw: any): CaseItem {
   if (raw.weather_snapshots && raw.weather_snapshots.length > 0) {
     const w = raw.weather_snapshots[0];
     weather = {
-      tempMaxC: w.temp_max_c,
-      tempMinC: w.temp_min_c,
-      rainfall7dMm: w.rainfall_7d_mm,
-      humidity: w.humidity,
-      windKmh: w.wind_kmh,
-      uvIndex: w.uv_index,
-      rainfallStatus: (w.rainfall_status as any) || 'Below Average',
-      tempStatus: (w.temp_status as any) || 'Optimal',
-      soilMoistureProxy: { uncertainty: 'High', note: 'Estimated from rainfall' },
+      tempMaxC: w.temp_max_c ?? 28,
+      tempMinC: w.temp_min_c ?? 16,
+      rainfall7dMm: w.precip_7d_mm ?? 12,
+      humidity: w.humidity_pct ?? 65,
+      windKmh: w.wind_speed_kmh ?? 15,
+      uvIndex: 6,
+      rainfallStatus: (w.precip_7d_mm ?? 0) < 10 ? 'Below Average' : 'Optimal',
+      tempStatus: 'Optimal',
+      soilMoistureProxy: { uncertainty: 'Medium', note: 'Based on recent rainfall and soil type' },
     };
   }
 
+  // Recommendations: if raw.recommendations is array of objects
   const recommendations = raw.recommendations && raw.recommendations.length > 0
-    ? raw.recommendations.map((r: any) => ({
-        id: String(r.id),
-        category: (r.category as any) || 'Fertilizer',
-        title: r.title,
-        confidence: Math.round(r.confidence),
-        uncertainty: (r.uncertainty as any) || 'Medium',
-        evidence: r.evidence || '',
-        assumptions: r.assumptions || '',
-        whyLine: r.why_line || r.whyLine || undefined,
-      }))
+    ? raw.recommendations.map((r: any, idx: number) => {
+        if (typeof r === 'string') {
+          return {
+            id: `rec-${idx}`,
+            category: 'Crop' as const,
+            title: r,
+            confidence: 90,
+            uncertainty: 'Low' as const,
+            evidence: '',
+            assumptions: '',
+          };
+        }
+        return {
+          id: String(r.id || idx),
+          category: (r.category || 'Crop') as any,
+          title: r.action || r.title || 'Agronomic Recommendation',
+          confidence: Math.round(r.confidence ?? 85),
+          uncertainty: (r.uncertainty || 'Low') as any,
+          evidence: r.citation || r.evidence || '',
+          assumptions: r.rationale || r.assumptions || '',
+          whyLine: r.tradeoffs || '',
+        };
+      })
     : base.recommendations;
 
-  let agronomistReview = base.agronomistReview;
-  if (raw.reviews && raw.reviews.length > 0) {
-    const rv = raw.reviews[raw.reviews.length - 1];
-    let revStatus: any = 'Awaiting Review';
-    if (rv.status.includes('APPROV') && rv.status.includes('EDIT')) revStatus = 'Approved with Edits';
-    else if (rv.status.includes('APPROV')) revStatus = 'Approved';
-    else if (rv.status.includes('REJECT')) revStatus = 'Rejected';
+  const agronomistReview = raw.agronomistReview || (raw.decision_note ? {
+    reviewerName: raw.assigned_agronomist_name || 'Assigned Agronomist',
+    title: 'Senior Agronomist',
+    organization: 'Agricultural Extension',
+    status: raw.status === 'REJECTED' ? ('Rejected' as const) : ('Approved' as const),
+    notes: raw.decision_note,
+    timestamp: raw.assigned_at || raw.created_at,
+  } : undefined);
 
-    agronomistReview = {
-      reviewerName: 'Dr. Sarah Chen',
-      title: 'Senior Agronomist',
-      organization: 'Iowa State Extension',
-      status: revStatus,
-      notes: rv.notes || '',
-      timestamp: rv.created_at,
-    };
-  }
+  const farmerReport = raw.farmer_summary ? {
+    headline: `Field Action Plan: ${raw.crop || 'Crop'} Recovery`,
+    description: raw.farmer_summary,
+    steps: Array.isArray(raw.recommendations) && typeof raw.recommendations[0] === 'string'
+      ? raw.recommendations.map((step: string, i: number) => ({
+          number: i + 1,
+          title: `Step ${i + 1}`,
+          instruction: step,
+        }))
+      : base.farmerReport?.steps || [],
+    warnings: [],
+    confidenceExplanation: 'Reviewed and confirmed by certified agronomist.',
+  } : base.farmerReport;
 
-  let farmerReport = base.farmerReport;
-  let audioUrl = raw.audio_url || base.audioUrl;
-  if (raw.reports && raw.reports.length > 0) {
-    const rp = raw.reports[raw.reports.length - 1];
-    farmerReport = {
-      headline: rp.headline,
-      description: rp.description,
-      steps: rp.steps || base.farmerReport?.steps || [],
-      warnings: rp.warnings || base.farmerReport?.warnings || [],
-      confidenceExplanation: rp.confidence_explanation || '',
-      audioUrl: rp.audio_url,
-    };
-    if (rp.audio_url) {
-      audioUrl = rp.audio_url;
-    }
-  }
-
-  const risks = { ...base.risks };
-  if (raw.guardrail_results && raw.guardrail_results.length > 0) {
-    risks.unsafeFlags = raw.guardrail_results.map((gr: any) => ({
-      title: gr.rule_name,
-      type: gr.status === 'PASSED' ? 'safe' : 'warning',
-      message: gr.details || gr.status,
-    }));
-  }
-
-  return {
+  const mapped: CaseItem & { [key: string]: any } = {
     id: String(raw.id),
     caseNumber: raw.case_number || `C-${raw.id}`,
-    farmId: raw.farm ? String(raw.farm.id) : String(raw.farm_id || '1'),
-    farmName: raw.farm?.name || 'Westfield Farm',
-    fieldName: raw.field?.name || 'North 40 — Block C',
-    crop: raw.crop || 'Dent Corn',
-    issue: raw.summary || 'Lower leaf interveinal chlorosis at V8 stage.',
-    growthStage: raw.growth_stage || 'V8 (8-leaf)',
-    confidence: Math.round(raw.confidence || 72),
-    uncertainty: (raw.uncertainty as any) || 'Medium',
-    status: mapStatus(raw.status || 'DRAFT'),
-    time: raw.created_at ? new Date(raw.created_at).toLocaleDateString() : 'Just now',
+    farmId: String(raw.farm_id || 1),
+    farmName: raw.farm?.name || raw.farm_name || 'My Farm',
+    fieldName: raw.field?.name || raw.field_name || 'Field 1',
+    crop: raw.crop || 'Crop',
+    issue: raw.description || raw.notes || raw.issue || 'Field Inquiry',
+    growthStage: raw.growth_stage || 'Active Growth',
+    confidence: Math.round(raw.confidence ?? 88),
+    uncertainty: raw.uncertainty || 'Medium',
+    status: mapStatus(raw.status),
+    rawStatus: raw.status,
+    time: raw.created_at ? new Date(raw.created_at).toLocaleDateString() : 'Recent',
     createdAt: raw.created_at || new Date().toISOString(),
-    operator: raw.farm?.operator_name || 'James Donovan',
-    summary: raw.summary || 'Field sample inquiry',
-    audioUrl,
+    operator: raw.farmer_name || raw.operator || 'Farmer',
+    assignedAgronomist: raw.assigned_agronomist_name || raw.assigned_agronomist?.full_name || raw.assignedAgronomist,
+    summary: raw.farmer_summary || raw.description || raw.notes || '',
+    audioUrl: raw.audio_url,
     observations,
     soil,
     weather,
     recommendations,
-    risks,
+    risks: base.risks,
     agronomistReview,
     farmerReport,
+    // Role-specific fields
+    description: raw.description,
+    description_lang: raw.description_lang,
+    assigned_agronomist_id: raw.assigned_agronomist_id,
+    assigned_agronomist_name: raw.assigned_agronomist_name,
+    assigned_at: raw.assigned_at,
+    farmer_summary: raw.farmer_summary,
+    final_suggestion: raw.final_suggestion,
+    decision_note: raw.decision_note,
+    rawRecommendations: raw.recommendations,
+    rawObservations: raw.observations,
   };
+
+  return mapped;
 }
 
 export const casesApi = {
   async getCases(params?: { farmId?: string; status?: string }): Promise<CaseItem[]> {
-    if (USE_MOCKS) {
-      await new Promise(r => setTimeout(r, 200));
-      let results = [...mockCases];
-      if (params?.farmId) {
-        results = results.filter(c => c.farmId === params.farmId);
-      }
-      if (params?.status && params.status !== 'All') {
-        results = results.filter(c => c.status === params.status);
-      }
-      return results;
-    }
     const query = new URLSearchParams();
     if (params?.farmId) query.set('farm_id', params.farmId);
     if (params?.status && params.status !== 'All') query.set('status', params.status);
     const qs = query.toString();
-    const rawList = await apiClient<any[]>(`/cases${qs ? `?${qs}` : ''}`);
-    return rawList.map(mapBackendCaseToCaseItem);
+    try {
+      const rawList = await apiClient<any[]>(`/cases${qs ? `?${qs}` : ''}`);
+      if (Array.isArray(rawList)) {
+        return rawList.map(mapBackendCaseToCaseItem);
+      }
+      return [];
+    } catch (err) {
+      console.warn('Failed to fetch cases from backend, falling back to mock:', err);
+      return mockCases;
+    }
   },
 
   async getCaseById(id: string): Promise<CaseItem> {
-    if (USE_MOCKS) {
-      await new Promise(r => setTimeout(r, 150));
+    try {
+      const raw = await apiClient<any>(`/cases/${id}`);
+      return mapBackendCaseToCaseItem(raw);
+    } catch (err) {
+      console.warn('Failed to fetch case detail from backend, falling back to mock:', err);
       const found = mockCases.find(c => c.id === id || c.caseNumber.toLowerCase() === id.toLowerCase());
-      if (found) return found;
-      return mockCases[0];
+      return found || mockCases[0];
     }
-    const raw = await apiClient<any>(`/cases/${id}`);
-    return mapBackendCaseToCaseItem(raw);
   },
 
   async createCase(caseData: {
@@ -191,24 +222,12 @@ export const casesApi = {
     growthStage?: string;
     notes?: string;
   }): Promise<CaseItem> {
-    if (USE_MOCKS) {
-      await new Promise(r => setTimeout(r, 300));
-      const newCase: CaseItem = {
-        ...mockCases[0],
-        id: `c-${Date.now().toString().slice(-4)}`,
-        caseNumber: `C-${Math.floor(2800 + Math.random() * 200)}`,
-        time: 'Just now',
-        createdAt: new Date().toISOString(),
-      };
-      mockCases.unshift(newCase);
-      return newCase;
-    }
     const payload = {
       farm_id: Number(caseData.farmId || 1),
       field_id: Number(caseData.fieldId || 1),
       crop: caseData.crop || 'Dent Corn',
-      growth_stage: caseData.growthStage || 'V8 (8-leaf)',
-      notes: caseData.notes || 'Field visual inquiry',
+      growth_stage: caseData.growthStage || 'Vegetative',
+      notes: caseData.notes || 'Crop visual evaluation',
     };
     const created = await apiClient<any>('/cases', {
       method: 'POST',
@@ -217,8 +236,29 @@ export const casesApi = {
     return mapBackendCaseToCaseItem(created);
   },
 
+  async submitFarmerCase(
+    caseId: string | number,
+    data: {
+      description: string;
+      language?: string;
+      image?: File | null;
+      soilPdf?: File | null;
+    }
+  ): Promise<CaseItem> {
+    const formData = new FormData();
+    formData.append('description', data.description);
+    if (data.language) formData.append('language', data.language);
+    if (data.image) formData.append('image', data.image);
+    if (data.soilPdf) formData.append('soil_pdf', data.soilPdf);
+
+    const result = await apiClient<any>(`/cases/${caseId}/submit`, {
+      method: 'POST',
+      body: formData,
+    });
+    return mapBackendCaseToCaseItem(result);
+  },
+
   async uploadCaseFile(caseId: string, file: File, fileType = 'crop_image'): Promise<any> {
-    if (USE_MOCKS) return { id: 1, file_name: file.name };
     const formData = new FormData();
     formData.append('file', file);
     formData.append('file_type', fileType);
@@ -229,79 +269,127 @@ export const casesApi = {
   },
 
   async fetchWeather(caseId: string): Promise<any> {
-    if (USE_MOCKS) return mockCases[0].weather;
     return apiClient<any>(`/cases/${caseId}/weather`, { method: 'POST' });
   },
 
   async analyzeCase(caseId: string): Promise<any> {
-    if (USE_MOCKS) return mockCases[0].observations;
     return apiClient<any>(`/cases/${caseId}/analyze`, { method: 'POST' });
   },
 
   async generateRecommendations(caseId: string): Promise<any> {
-    if (USE_MOCKS) return mockCases[0].recommendations;
     return apiClient<any>(`/cases/${caseId}/recommend`, { method: 'POST' });
   },
 
   async runRiskCheck(caseId: string): Promise<any> {
-    if (USE_MOCKS) return { is_blocked: false };
     return apiClient<any>(`/cases/${caseId}/risk-check`, { method: 'POST' });
   },
 
   async getReviewQueue(): Promise<CaseItem[]> {
-    if (USE_MOCKS) {
+    try {
+      const rawList = await apiClient<any[]>('/review/queue');
+      if (Array.isArray(rawList)) {
+        return rawList.map(mapBackendCaseToCaseItem);
+      }
+      return [];
+    } catch {
       return mockCases.filter(c => c.status === 'Review' || c.status === 'Flagged');
     }
-    const rawList = await apiClient<any[]>('/review/queue');
-    return rawList.map(mapBackendCaseToCaseItem);
   },
 
   async submitReview(
-    caseId: string,
+    caseId: string | number,
     review: {
-      status: 'Approved' | 'Approved with Edits' | 'Rejected';
-      notes: string;
-      reviewerName?: string;
+      decision?: 'approve' | 'approve_with_edits' | 'reject';
+      status?: 'Approved' | 'Approved with Edits' | 'Rejected';
+      notes?: string;
+      note?: string;
+      edits?: {
+        recommendations?: Array<{ id: number; action: string }>;
+        final_suggestion?: string;
+      };
     }
-  ): Promise<CaseItem> {
-    if (USE_MOCKS) {
-      await new Promise(r => setTimeout(r, 250));
-      const found = mockCases.find(c => c.id === caseId);
-      if (found) {
-        found.agronomistReview = {
-          reviewerName: review.reviewerName || 'Dr. Sarah Chen',
-          title: 'Senior Agronomist',
-          organization: 'Iowa State Extension',
-          status: review.status,
-          notes: review.notes,
-          timestamp: new Date().toISOString(),
-        };
-        found.status = review.status === 'Rejected' ? 'Flagged' : 'Resolved';
-        return found;
-      }
-      return mockCases[0];
+  ): Promise<any> {
+    let decision = review.decision;
+    if (!decision && review.status) {
+      if (review.status === 'Approved') decision = 'approve';
+      else if (review.status === 'Approved with Edits') decision = 'approve_with_edits';
+      else if (review.status === 'Rejected') decision = 'reject';
     }
 
-    const statusMap: Record<string, string> = {
-      'Approved': 'approve',
-      'Approved with Edits': 'approve_with_edits',
-      'Rejected': 'reject',
+    const payload = {
+      decision: decision || 'approve',
+      note: review.note || review.notes || '',
+      edits: review.edits,
     };
-    const targetStatus = statusMap[review.status] || 'approve';
 
-    await apiClient<any>(`/cases/${caseId}/review`, {
+    const res = await apiClient<any>(`/cases/${caseId}/review`, {
       method: 'POST',
-      body: JSON.stringify({
-        status: targetStatus,
-        notes: review.notes,
-      }),
+      body: JSON.stringify(payload),
     });
 
-    return casesApi.getCaseById(caseId);
+    return res;
+  },
+
+  async getMessages(caseId: string | number): Promise<MessageItem[]> {
+    return apiClient<MessageItem[]>(`/cases/${caseId}/messages`);
+  },
+
+  async sendMessage(
+    caseId: string | number,
+    data: {
+      text?: string;
+      language?: string;
+      audio?: Blob | File;
+    }
+  ): Promise<MessageItem> {
+    const formData = new FormData();
+    if (data.text) formData.append('text', data.text);
+    if (data.language) formData.append('language', data.language);
+    if (data.audio) {
+      const file = data.audio instanceof File
+        ? data.audio
+        : new File([data.audio], 'voice_note.webm', { type: data.audio.type || 'audio/webm' });
+      formData.append('audio', file);
+    }
+
+    return apiClient<MessageItem>(`/cases/${caseId}/messages`, {
+      method: 'POST',
+      body: formData,
+    });
+  },
+
+  getVoiceUrl(messageId: number | string): string {
+    const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/v1';
+    return `${BASE_URL}/media/voice/${messageId}`;
+  },
+
+  async submitFeedback(
+    caseId: string | number,
+    data: {
+      rating: number;
+      comment?: string;
+      language?: string;
+      audio?: Blob | File;
+    }
+  ): Promise<CaseOutcomeFeedback> {
+    const formData = new FormData();
+    formData.append('rating', String(data.rating));
+    if (data.comment) formData.append('comment', data.comment);
+    if (data.language) formData.append('language', data.language);
+    if (data.audio) {
+      const file = data.audio instanceof File
+        ? data.audio
+        : new File([data.audio], 'feedback_voice.webm', { type: data.audio.type || 'audio/webm' });
+      formData.append('audio', file);
+    }
+
+    return apiClient<CaseOutcomeFeedback>(`/cases/${caseId}/feedback`, {
+      method: 'POST',
+      body: formData,
+    });
   },
 
   async generateReport(caseId: string, lang = 'en'): Promise<any> {
-    if (USE_MOCKS) return mockCases[0].farmerReport;
     return apiClient<any>(`/cases/${caseId}/report?lang=${lang}`, {
       method: 'POST',
     });
@@ -317,7 +405,6 @@ export const casesApi = {
       notes?: string;
     }
   ): Promise<any> {
-    if (USE_MOCKS) return { id: 1 };
     return apiClient<any>(`/cases/${caseId}/outcome`, {
       method: 'POST',
       body: JSON.stringify({

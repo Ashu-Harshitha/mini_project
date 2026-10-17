@@ -29,6 +29,16 @@ export interface CaseItem {
   confidence: number; // Single % number
   uncertainty: 'Low' | 'Medium' | 'High';
   status: 'Resolved' | 'Review' | 'Flagged' | 'Draft' | 'Agronomist';
+  rawStatus?: string;
+  description?: string;
+  description_lang?: string;
+  assigned_at?: string;
+  assigned_agronomist_id?: number | null;
+  assigned_agronomist_name?: string | null;
+  farmer_summary?: string | null;
+  final_suggestion?: string | null;
+  decision_note?: string | null;
+  rawRecommendations?: any[];
   time: string;
   createdAt: string;
   operator: string;

@@ -39,6 +39,38 @@ export const farmsApi = {
     return mapFarmFromBackend(raw);
   },
 
+  async createFarm(data: {
+    name: string;
+    operator_name: string;
+    location: string;
+    total_acreage?: number;
+    latitude?: number;
+    longitude?: number;
+    primary_crops?: string[];
+    is_organic?: boolean;
+  }): Promise<Farm> {
+    const raw = await apiClient<any>('/farms', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    return mapFarmFromBackend(raw);
+  },
+
+  async createField(
+    farmId: string | number,
+    data: {
+      name: string;
+      acreage: number;
+      soil_type?: string;
+      current_crop?: string;
+    }
+  ): Promise<any> {
+    return apiClient<any>(`/farms/${farmId}/fields`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
   async updateFarm(id: string, updates: Partial<Farm>): Promise<Farm> {
     if (USE_MOCKS) {
       const idx = mockFarms.findIndex(f => f.id === id);

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '@/store/useAppStore';
+import { getNavItemsForRole } from '@/config/nav';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -36,92 +37,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { t } = useTranslation();
   const { user } = useAppStore();
 
-  // Navigation items
-  const navItems = [
-    {
-      to: '/dashboard',
-      label: t('nav.dashboard', 'Dashboard'),
-      icon: LayoutDashboard,
-      roles: ['farmer', 'agronomist', 'admin'],
-    },
-    {
-      to: '/cases',
-      label: t('nav.caseHistory', 'Case History'),
-      icon: History,
-      roles: ['farmer', 'agronomist', 'admin'],
-    },
-    {
-      to: '/review-queue',
-      label: t('nav.reviewQueue', 'Review Queue'),
-      icon: ClipboardList,
-      badge: 7,
-      roles: ['agronomist', 'admin'],
-    },
-    {
-      to: '/admin/users',
-      label: t('admin.manageUsers', 'Manage Users'),
-      icon: Users,
-      roles: ['admin'], // Admin exclusive
-    },
-    {
-      to: '/models',
-      label: t('nav.modelComparison', 'Model Comparison'),
-      icon: Scale,
-      roles: ['farmer', 'agronomist', 'admin'],
-    },
-    {
-      to: '/prompt-lab',
-      label: t('nav.promptLab', 'Prompt Lab'),
-      icon: FlaskConical,
-      roles: ['farmer', 'agronomist', 'admin'],
-    },
-    {
-      to: '/evaluation',
-      label: t('nav.evaluation', 'Evaluation'),
-      icon: CheckCircle2,
-      roles: ['farmer', 'agronomist', 'admin'],
-    },
-    {
-      to: '/responsible-ai',
-      label: t('nav.responsibleAi', 'Responsible AI'),
-      icon: ShieldCheck,
-      roles: ['farmer', 'agronomist', 'admin'],
-    },
-    {
-      to: '/rag-explorer',
-      label: t('nav.ragExplorer', 'RAG Explorer'),
-      icon: Database,
-      roles: ['farmer', 'agronomist', 'admin'],
-    },
-    {
-      to: '/guardrails',
-      label: t('nav.guardrails', 'Guardrail Rules'),
-      icon: ShieldAlert,
-      roles: ['admin'], // Admin exclusive
-    },
-    {
-      to: '/feedback',
-      label: t('nav.feedback', 'Outcome Feedback'),
-      icon: Sprout,
-      roles: ['farmer', 'agronomist', 'admin'],
-    },
-    {
-      to: '/notifications',
-      label: t('nav.notifications', 'Notifications'),
-      icon: Bell,
-      roles: ['farmer', 'agronomist', 'admin'],
-    },
-    {
-      to: '/settings',
-      label: t('nav.settings', 'Settings'),
-      icon: SettingsIcon,
-      roles: ['farmer', 'agronomist', 'admin'],
-    },
-  ];
-
-  // Filter items by current user role
   const currentRole = user?.role || 'farmer';
-  const visibleItems = navItems.filter((item) => item.roles.includes(currentRole));
+  const visibleItems = getNavItemsForRole(currentRole);
 
   return (
     <aside
@@ -159,37 +76,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        {/* "+ New Case" Prominent Action Button */}
-        <div className="p-3">
-          <Link
-            to="/new-case"
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-semibold text-xs text-white bg-emerald-800 hover:bg-emerald-900 shadow-sm transition-all duration-200 ${
-              collapsed ? 'justify-center px-0' : ''
-            }`}
-            title="Create New Case"
-          >
-            <div className="flex items-center gap-2">
-              <PlusCircle className="w-4 h-4 text-emerald-300" />
-              {!collapsed && <span>{t('wizard.title', 'New Case')}</span>}
-            </div>
-            {!collapsed && (
-              <span className="w-5 h-5 rounded-full bg-emerald-700 text-white flex items-center justify-center text-xs">
-                +
-              </span>
-            )}
-          </Link>
-        </div>
+        {/* "+ New Case" Prominent Action Button for Farmers */}
+        {currentRole === 'farmer' && (
+          <div className="p-3">
+            <Link
+              to="/new-case"
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl font-semibold text-xs text-white bg-emerald-800 hover:bg-emerald-900 shadow-sm transition-all duration-200 ${
+                collapsed ? 'justify-center px-0' : ''
+              }`}
+              title="Create New Case"
+            >
+              <div className="flex items-center gap-2">
+                <PlusCircle className="w-4 h-4 text-emerald-300" />
+                {!collapsed && <span>{t('wizard.title', 'New Case')}</span>}
+              </div>
+              {!collapsed && (
+                <span className="w-5 h-5 rounded-full bg-emerald-700 text-white flex items-center justify-center text-xs">
+                  +
+                </span>
+              )}
+            </Link>
+          </div>
+        )}
 
         {/* Navigation list */}
         <nav className="px-2 py-1 space-y-1 overflow-y-auto max-h-[calc(100vh-210px)]">
           {visibleItems.map((item) => {
             const Icon = item.icon;
+            const labelText = t(item.labelKey, item.defaultLabel);
             return (
               <NavLink
                 key={item.to}
                 to={item.to}
                 end={item.to === '/'}
-                title={collapsed ? item.label : undefined}
+                title={collapsed ? labelText : undefined}
                 className={({ isActive }) =>
                   `flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-150 ${
                     isActive
@@ -200,7 +120,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               >
                 <Icon className={`w-4 h-4 flex-shrink-0`} />
                 {!collapsed && (
-                  <span className="truncate flex-1 text-left">{item.label}</span>
+                  <span className="truncate flex-1 text-left">{labelText}</span>
                 )}
                 {!collapsed && item.badge !== undefined && (
                   <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white">

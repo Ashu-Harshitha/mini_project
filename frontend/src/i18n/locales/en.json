@@ -13,6 +13,11 @@
     "dashboard": "Dashboard",
     "newCase": "New Case",
     "caseHistory": "Case History",
+    "myCases": "My Cases",
+    "agronomists": "Agronomists",
+    "allCases": "All Cases",
+    "communicationLogs": "Communication Logs",
+    "farmerFeedback": "Farmer Feedback",
     "reviewQueue": "Review Queue",
     "modelComparison": "Model Comparison",
     "promptLab": "Prompt Lab",
@@ -166,6 +171,62 @@
   },
   "admin": {
     "manageUsers": "Manage Users",
-    "addAgronomist": "Add Agronomist"
+    "addAgronomist": "Add Agronomist",
+    "agronomists": "Agronomists",
+    "allCases": "All Cases",
+    "communicationLogs": "Communication Logs",
+    "farmerFeedback": "Farmer Feedback"
+  },
+  "farmer": {
+    "dashboardBadge": "Field Advisory & Health Assistant",
+    "welcome": "Welcome back",
+    "heroText": "Have a crop issue? Describe your crop symptom or record a voice note to get expert guidance.",
+    "askQuestion": "New Crop Inquiry",
+    "viewMyCases": "My Cases",
+    "openCases": "Open Cases",
+    "waitingForExpert": "With Expert",
+    "latestAdvice": "Latest Advice",
+    "notifications": "Notifications",
+    "recentInquiries": "Recent Crop Cases",
+    "newCaseHeader": "New Crop Inquiry",
+    "newCaseSubtitle": "Describe the problem in your own words. An expert agronomist will examine your crop.",
+    "describeProblem": "Describe the problem in your own words",
+    "descPlaceholder": "Example: Leaves are turning yellow at the tips, lower foliage has brown spots, and growth seems stunted after recent rain.",
+    "uploadPhoto": "Crop Photo (Optional)",
+    "uploadSoilPdf": "Soil Test Report (Optional)",
+    "submitCaseBtn": "Submit Inquiry to Agronomist",
+    "quickSetupTitle": "Quick Farm Profile Setup",
+    "quickSetupDesc": "Set up your farm once so our agronomists can assess weather and local soil conditions.",
+    "farmSetupError": "Please provide farm name and town/village.",
+    "voiceNoteAttached": "[Voice note attached. Farmer described crop symptoms via audio]",
+    "minDescLength": "Please describe the problem in at least 10 characters or record a voice note."
+  },
+  "voice": {
+    "spokenLanguage": "Voice Language",
+    "tapToRecord": "Tap microphone to speak (max 60s)",
+    "tapToStop": "Tap button to stop recording",
+    "previewNote": "Recorded voice note",
+    "reRecord": "Re-record",
+    "sendAudio": "Send Voice Note",
+    "permissionDenied": "Microphone access denied. Please allow microphone permissions in your browser.",
+    "deviceError": "Could not access microphone hardware."
+  },
+  "chat": {
+    "title": "Case Conversation & Voice Notes",
+    "placeholder": "Type a message in your language...",
+    "expertDecisionNote": "Agronomist Decision Note"
+  },
+  "status": {
+    "pending": "Pending Review",
+    "withExpert": "With Expert",
+    "resolved": "Decision Approved",
+    "rejected": "Rejected",
+    "flagged": "High Risk / Blocked",
+    "draft": "Draft"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "loading": "Loading...",
+    "viewAll": "View All"
   }
 }

@@ -10,6 +10,7 @@ from sqlalchemy import (
     Text,
     JSON,
     Index,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.orm import relationship
@@ -37,11 +38,15 @@ class User(Base):
     phone = Column(String(50), nullable=True)
     language = Column(String(10), default="en", nullable=False)  # 'en', 'hi', 'kn'
     active = Column(Boolean, default=True, nullable=False)
+    available = Column(Boolean, default=True, nullable=False)
+    max_open_cases = Column(Integer, default=5, nullable=False)
+    last_assigned_at = Column(DateTime, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
 
-    cases = relationship("Case", back_populates="user")
+    cases = relationship("Case", foreign_keys="Case.user_id", back_populates="user")
+    assigned_cases = relationship("Case", foreign_keys="Case.assigned_agronomist_id", back_populates="assigned_agronomist")
     reviews = relationship("Review", back_populates="reviewer")
     notifications = relationship("Notification", back_populates="user")
 
@@ -99,12 +104,21 @@ class Case(Base):
     confidence = Column(Float, default=0.0)
     uncertainty = Column(String(20), default="Medium")  # Low, Medium, High
     summary = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
+    description_lang = Column(String(10), default="en", nullable=True)
+    assigned_agronomist_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    assigned_at = Column(DateTime, nullable=True)
+    reassign_count = Column(Integer, default=0, nullable=False)
+    farmer_summary = Column(Text, nullable=True)
+    final_suggestion = Column(Text, nullable=True)
+    decision_note = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
 
     farm = relationship("Farm", back_populates="cases")
     field = relationship("Field", back_populates="cases")
-    user = relationship("User", back_populates="cases")
+    user = relationship("User", foreign_keys=[user_id], back_populates="cases")
+    assigned_agronomist = relationship("User", foreign_keys=[assigned_agronomist_id], back_populates="assigned_cases")
     files = relationship("CaseFile", back_populates="case", cascade="all, delete-orphan")
     observations = relationship("Observation", back_populates="case", cascade="all, delete-orphan")
     soil_results = relationship("SoilResult", back_populates="case", cascade="all, delete-orphan")
@@ -115,6 +129,8 @@ class Case(Base):
     reports = relationship("Report", back_populates="case", cascade="all, delete-orphan")
     outcome_feedback = relationship("OutcomeFeedback", back_populates="case", uselist=False, cascade="all, delete-orphan")
     audit_logs = relationship("AuditLog", back_populates="case", cascade="all, delete-orphan")
+    assignments = relationship("Assignment", back_populates="case", cascade="all, delete-orphan")
+    messages = relationship("Message", back_populates="case", cascade="all, delete-orphan")
 
 
 class CaseFile(Base):
@@ -205,6 +221,14 @@ class Recommendation(Base):
 
     case = relationship("Case", back_populates="recommendations")
 
+    @property
+    def action(self) -> str:
+        return self.title
+
+    @action.setter
+    def action(self, value: str):
+        self.title = value
+
 
 class GuardrailResult(Base):
     __tablename__ = "guardrail_results"
@@ -273,7 +297,12 @@ class OutcomeFeedback(Base):
     id = Column(Integer, primary_key=True, index=True)
     case_id = Column(Integer, ForeignKey("cases.id", ondelete="CASCADE"), unique=True, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    actual_diagnosis = Column(String(255), nullable=False)
+    agronomist_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    rating = Column(Integer, default=5, nullable=False)  # 1-5
+    comment = Column(Text, nullable=True)
+    comment_lang = Column(String(10), default="en", nullable=True)
+    audio_path = Column(String(500), nullable=True)
+    actual_diagnosis = Column(String(255), nullable=True)
     treatments_applied = Column(JSON, nullable=True)  # ["..."]
     yield_impact_rating = Column(Integer, default=5)  # 1-5
     harvest_yield = Column(Float, nullable=True)  # bu/ac or kg/ha
@@ -281,6 +310,56 @@ class OutcomeFeedback(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 
     case = relationship("Case", back_populates="outcome_feedback")
+    user = relationship("User", foreign_keys=[user_id])
+    agronomist = relationship("User", foreign_keys=[agronomist_id])
+
+
+class Assignment(Base):
+    __tablename__ = "assignments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(Integer, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    from_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    to_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    reason = Column(String(50), nullable=False)  # 'auto', 'continuity', 'timeout', 'admin'
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    case = relationship("Case", back_populates="assignments")
+    from_user = relationship("User", foreign_keys=[from_user_id])
+    to_user = relationship("User", foreign_keys=[to_user_id])
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(Integer, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    sender_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    sender_role = Column(String(50), nullable=False)  # 'farmer', 'agronomist', 'admin'
+    kind = Column(String(50), default="text", nullable=False)  # 'text', 'voice', 'decision', 'feedback'
+    original_lang = Column(String(10), default="en", nullable=False)
+    original_text = Column(Text, nullable=True)
+    audio_path = Column(String(500), nullable=True)
+    transcript_status = Column(String(50), default="none", nullable=False)  # 'none', 'pending', 'done', 'failed'
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    case = relationship("Case", back_populates="messages")
+    sender = relationship("User", foreign_keys=[sender_id])
+    translations = relationship("MessageTranslation", back_populates="message", cascade="all, delete-orphan")
+
+
+class MessageTranslation(Base):
+    __tablename__ = "message_translations"
+    __table_args__ = (
+        UniqueConstraint("message_id", "lang", name="uq_message_translation_lang"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(Integer, ForeignKey("messages.id", ondelete="CASCADE"), nullable=False)
+    lang = Column(String(10), nullable=False)
+    text = Column(Text, nullable=False)
+
+    message = relationship("Message", back_populates="translations")
 
 
 class ChemicalRule(Base):
