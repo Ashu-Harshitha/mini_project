@@ -13,10 +13,11 @@ from fastapi import (
     BackgroundTasks,
     status,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response, JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from app.core.config import settings
 from app.core.database import get_db, SessionLocal
 from app.models.models import (
     Case,
@@ -35,40 +36,47 @@ from app.models.models import (
     Message,
     MessageTranslation,
     Review,
+    SensorReport,
+    SensorReading,
 )
 from app.schemas.schemas import (
     CaseCreate,
     CaseSubmit,
     CaseRead,
-    FarmerCaseRead,
-    CaseDetailRead,
     CaseFileRead,
-    SoilResultCreate,
     SoilResultRead,
+    SoilPatch,
     WeatherSnapshotRead,
     ObservationRead,
     RecommendationRead,
     ReportRead,
-    OutcomeFeedbackCreate,
     OutcomeFeedbackRead,
     MessageRead,
+    FieldLocationUpdate,
+    SensorLatestUpdate,
+    GeocodePlaceRead,
 )
 from app.api.deps import get_current_user
 from app.services.case_state import CaseStateMachine, CaseState
 from app.services.storage import get_storage_service
-from app.services.weather import fetch_open_meteo_weather
+from app.services.weather import fetch_open_meteo_weather, geocode_open_meteo
 from app.services.ai.factory import (
     get_image_analyzer,
     get_recommender,
     get_translator,
     get_tts,
+    get_retriever,
 )
 from app.core.confidence import calculate_confidence, get_uncertainty_band
 from app.guardrails.engine import GuardrailEngine
 from app.services.notifications import notify
-from app.services.assignment import assign_case
 from app.services.audio import process_voice_upload
 from app.services.ai.gemini_client import get_gemini_client
+from app.services.ai.pipeline import run_case_pipeline
+from app.sensors.parser import parse_sensor_pdf
+from app.sensors.generator import generate_sensor_pdf
+from app.sensors.summary import compute_sensor_summary
+from app.sensors.interpret import interpret_sensor_data
 
 logger = logging.getLogger("agriadvisor.cases")
 
@@ -170,16 +178,18 @@ def create_case(
     return new_case
 
 
-@router.post("/cases/{id}/submit", status_code=status.HTTP_200_OK)
+@router.post("/cases/{id}/submit", status_code=status.HTTP_202_ACCEPTED)
 def submit_case(
     id: Union[int, str],
     payload: CaseSubmit,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Submits a farmer case (farmer only, own case). Requires description >= 10 chars.
-    Runs analyze -> recommend -> risk-check, transitions case to PENDING_REVIEW, then assign_case.
+    Returns 202 immediately (status ANALYZING) and runs analyze -> recommend -> risk-check
+    -> PENDING_REVIEW -> assign_case in a BackgroundTask.
     """
     case = get_case_or_404(db, id)
 
@@ -187,6 +197,17 @@ def submit_case(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Forbidden: only the owner farmer can submit this case.",
+        )
+
+    # Validate field coordinates (422 {code: "location_required"} if missing)
+    field = case.field
+    if not field or field.lat is None or field.lng is None:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={
+                "code": "location_required",
+                "detail": "Field location coordinates are required before submitting a case.",
+            },
         )
 
     clean_desc = payload.description.strip() if payload.description else ""
@@ -198,32 +219,82 @@ def submit_case(
 
     case.description = clean_desc
     case.description_lang = payload.description_lang or "en"
+    case.location_snapshot = {
+        "lat": field.lat,
+        "lng": field.lng,
+        "accuracy_m": field.accuracy_m,
+        "source": field.location_source or "gps",
+    }
+
+    try:
+        CaseStateMachine.transition(
+            db, case, CaseState.ANALYZING, user_id=current_user.id, action="FARMER_SUBMIT", details="Submitted. AI analysis initialized."
+        )
+    except Exception:
+        case.status = CaseState.ANALYZING
     db.commit()
 
-    # Run AI diagnostic pipeline
-    try:
-        analyze_case(id, db, current_user)
-        generate_recommendations(id, db, current_user)
-        run_risk_check(id, db, current_user)
-    except Exception as e:
-        logger.warning(f"Error during AI pipeline execution for case {case.case_number}: {e}")
-
-    # Ensure status is PENDING_REVIEW
-    if case.status != CaseState.BLOCKED:
-        if case.status != CaseState.PENDING_REVIEW:
-            try:
-                CaseStateMachine.transition(
-                    db, case, CaseState.PENDING_REVIEW, user_id=current_user.id, action="FARMER_SUBMIT", details="Submitted for review."
-                )
-            except Exception:
-                case.status = CaseState.PENDING_REVIEW
-                db.commit()
-
-        # Assign case to eligible agronomist
-        assign_case(case.id, db, reason="auto")
+    # Enqueue pipeline execution as background task
+    background_tasks.add_task(run_case_pipeline, case.id, current_user.id)
 
     db.refresh(case)
     return _format_farmer_case(case)
+
+
+@router.patch("/cases/{id}/soil", response_model=SoilResultRead)
+def update_case_soil(
+    id: Union[int, str],
+    payload: SoilPatch,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Allows the farmer (or agronomist/admin) to correct soil test values.
+    Validates range (pH 3-10).
+    """
+    case = get_case_or_404(db, id)
+
+    # Authorization
+    if current_user.role == "farmer" and case.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: you can only update soil metrics for your own cases.",
+        )
+
+    # Range validation: pH 3-10
+    if payload.ph is not None and not (3.0 <= payload.ph <= 10.0):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Soil pH must be between 3.0 and 10.0.",
+        )
+
+    soil = db.query(SoilResult).filter(SoilResult.case_id == case.id).first()
+    if not soil:
+        soil = SoilResult(case_id=case.id, n_value="User provided")
+        db.add(soil)
+
+    if payload.n_ppm is not None:
+        soil.n_ppm = payload.n_ppm
+        soil.n_value = f"{payload.n_ppm:.1f} ppm NO3-N"
+    if payload.p_ppm is not None:
+        soil.p_ppm = payload.p_ppm
+    if payload.k_ppm is not None:
+        soil.k_ppm = payload.k_ppm
+    if payload.ph is not None:
+        soil.ph = payload.ph
+        soil.ph_value = f"pH {payload.ph:.1f}"
+    if payload.sample_date is not None:
+        soil.sample_date = payload.sample_date
+    if payload.needs_confirmation is not None:
+        soil.needs_confirmation = payload.needs_confirmation
+    else:
+        # If all core metrics are provided, clear confirmation flag
+        if soil.n_ppm is not None and soil.p_ppm is not None and soil.k_ppm is not None and soil.ph is not None:
+            soil.needs_confirmation = False
+
+    db.commit()
+    db.refresh(soil)
+    return soil
 
 
 # -----------------------------
@@ -365,13 +436,8 @@ def get_case_messages(
         if case.user_id != current_user.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     elif role == "agronomist":
-        is_current = case.assigned_agronomist_id == current_user.id
-        is_past = (
-            db.query(Assignment).filter(Assignment.case_id == case.id, Assignment.to_user_id == current_user.id).first()
-            or db.query(Review).filter(Review.case_id == case.id, Review.reviewer_id == current_user.id).first()
-        )
-        if not (is_current or is_past):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        # All active agronomists can inspect case dialogue to review or assist
+        pass
 
     viewer_lang = current_user.language or "en"
     messages = db.query(Message).filter(Message.case_id == case.id).order_by(Message.created_at.asc()).all()
@@ -487,12 +553,16 @@ async def post_case_message(
 
     # Authorization
     is_owner_farmer = current_user.role == "farmer" and case.user_id == current_user.id
-    is_assigned_agro = current_user.role == "agronomist" and case.assigned_agronomist_id == current_user.id
-    if not (is_owner_farmer or is_assigned_agro):
+    is_agro = current_user.role == "agronomist"
+    is_admin = current_user.role == "admin"
+    if not (is_owner_farmer or is_agro or is_admin):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Forbidden: only the farmer or assigned agronomist can exchange messages in this case.",
+            detail="Forbidden: only the farmer, agronomist, or admin can exchange messages in this case.",
         )
+    if is_agro and not case.assigned_agronomist_id:
+        case.assigned_agronomist_id = current_user.id
+        case.assigned_at = datetime.datetime.now(datetime.timezone.utc)
 
     clean_text = text.strip() if text else None
     if not clean_text and not audio:
@@ -743,21 +813,53 @@ async def fetch_case_weather(
     current_user: User = Depends(get_current_user),
 ):
     case = get_case_or_404(db, id)
-    farm = case.farm
+    lat = None
+    lng = None
+    if case.location_snapshot and isinstance(case.location_snapshot, dict):
+        lat = case.location_snapshot.get("lat")
+        lng = case.location_snapshot.get("lng")
+    if lat is None and case.field and case.field.lat is not None:
+        lat = case.field.lat
+        lng = case.field.lng
+    if lat is None and case.farm:
+        lat = case.farm.latitude
+        lng = case.farm.longitude
+    if lat is None or lng is None:
+        lat = 42.0308
+        lng = -93.6319
+
     weather_data = await fetch_open_meteo_weather(
-        lat=farm.latitude or 42.0308,
-        lng=farm.longitude or -93.6319,
+        lat=float(lat),
+        lng=float(lng),
     )
+    if not weather_data:
+        weather_data = {
+            "temp_max_c": 28.0,
+            "temp_min_c": 16.0,
+            "rainfall_7d_mm": 12.0,
+            "humidity": 65.0,
+            "wind_kmh": 15.0,
+            "uv_index": 6.0,
+            "rainfall_status": "Below Average",
+            "temp_status": "Optimal",
+            "lat": float(lat),
+            "lng": float(lng),
+            "raw_data": {"fallback": True},
+        }
     snapshot = WeatherSnapshot(
         case_id=case.id,
-        temp_max_c=weather_data["temp_max_c"],
-        temp_min_c=weather_data["temp_min_c"],
-        rainfall_7d_mm=weather_data["rainfall_7d_mm"],
-        humidity=weather_data["humidity"],
-        wind_kmh=weather_data["wind_kmh"],
-        uv_index=weather_data["uv_index"],
-        rainfall_status=weather_data["rainfall_status"],
-        temp_status=weather_data["temp_status"],
+        temp_max_c=weather_data.get("temp_max_c", 28.0),
+        temp_min_c=weather_data.get("temp_min_c", 16.0),
+        rainfall_7d_mm=weather_data.get("rainfall_7d_mm", 12.0),
+        humidity=weather_data.get("humidity", 65.0),
+        wind_kmh=weather_data.get("wind_kmh", 15.0),
+        uv_index=weather_data.get("uv_index", 6.0),
+        rainfall_status=weather_data.get("rainfall_status", "Below Average"),
+        temp_status=weather_data.get("temp_status", "Optimal"),
+        lat=weather_data.get("lat", float(lat)),
+        lng=weather_data.get("lng", float(lng)),
+        fetched_at=datetime.datetime.now(datetime.timezone.utc),
+        source="open-meteo",
         raw_data=weather_data.get("raw_data"),
     )
     db.add(snapshot)
@@ -779,15 +881,31 @@ def analyze_case(
 
     analyzer = get_image_analyzer()
     image_path = case.files[0].file_path if case.files else "mock_corn_leaf.jpg"
-    raw_obs = analyzer.analyze_image(image_path, case.crop, case.growth_stage)
+    raw_obs_res = analyzer.analyze_image(
+        image_path,
+        case.crop,
+        case.growth_stage,
+        case_id=case.id,
+        field_id=case.field_id,
+        farmer_description=case.description,
+        db=db,
+    )
+
+    obs_list = raw_obs_res.get("observations", []) if isinstance(raw_obs_res, dict) else raw_obs_res
+    if isinstance(raw_obs_res, dict):
+        if raw_obs_res.get("issue_hint"):
+            case.issue_category = raw_obs_res["issue_hint"]
+        if raw_obs_res.get("uncertainty_level"):
+            case.uncertainty = raw_obs_res["uncertainty_level"]
 
     observations: List[Observation] = []
-    for o in raw_obs:
+    for o in obs_list:
+        desc = o.get("text") or o.get("description") or "Visual symptom"
         obs = Observation(
             case_id=case.id,
-            description=o["description"],
-            confidence=o["confidence"],
-            uncertainty=o["uncertainty"],
+            description=desc,
+            confidence=float(o.get("confidence", 80.0)),
+            uncertainty=o.get("uncertainty", "Medium"),
             note=o.get("note"),
         )
         db.add(obs)
@@ -804,6 +922,11 @@ def analyze_case(
             ph_citation="ISU Ext. PM 1688",
             pk_value="P & K Sufficient",
             pk_status="Adequate",
+            n_ppm=18.0,
+            p_ppm=24.0,
+            k_ppm=170.0,
+            ph=6.2,
+            needs_confirmation=False,
         )
         db.add(soil)
 
@@ -826,34 +949,86 @@ def generate_recommendations(
 
     recommender = get_recommender()
     obs_data = [{"description": o.description, "confidence": o.confidence} for o in case.observations]
-    soil_data = {"n_value": "18 ppm", "status": "Marginal"}
+
+    soil_res = case.soil_results[0] if case.soil_results else None
+    soil_data = {
+        "n_value": soil_res.n_value if soil_res else "18 ppm",
+        "n_ppm": soil_res.n_ppm if soil_res else 18.0,
+        "ph": soil_res.ph if soil_res else 6.2,
+    }
     weather_data = {"rainfall_7d_mm": 12.0}
 
-    candidates = recommender.generate_recommendations(case.crop, case.growth_stage, obs_data, soil_data, weather_data)
+    field_profile = {
+        "field_id": case.field_id,
+        "crop": case.crop,
+        "growth_stage": case.growth_stage,
+        "soil_type": getattr(case.field, "soil_type", "Loam") if case.field else "Loam",
+        "irrigation_system": getattr(case.farm, "irrigation_system", "Center pivot") if case.farm else "Center pivot",
+        "is_organic": getattr(case.farm, "is_organic", False) if case.farm else False,
+    }
+
+    # Evaluate sensor summary & interpretation
+    sensor_interpretation = []
+    if case.sensor_summary:
+        try:
+            sensor_interpretation = interpret_sensor_data(case.sensor_summary, crop=case.crop)
+        except Exception as interp_err:
+            logger.warning(f"Sensor interpretation error: {interp_err}")
+
+    candidates_raw = recommender.generate_recommendations(
+        crop=case.crop,
+        growth_stage=case.growth_stage,
+        observations=obs_data,
+        soil_data=soil_data,
+        weather_data=weather_data,
+        case_id=case.id,
+        farmer_description=case.description,
+        farmer_language=case.description_lang or "en",
+        field_profile=field_profile,
+        retriever=get_retriever(),
+        db=db,
+        sensor_summary=case.sensor_summary,
+        interpretation=sensor_interpretation,
+    )
+
+    if isinstance(candidates_raw, dict):
+        if candidates_raw.get("issue_label"):
+            case.issue_label = candidates_raw["issue_label"]
+        if candidates_raw.get("issue_category"):
+            case.issue_category = candidates_raw["issue_category"]
+        if candidates_raw.get("confidence") is not None:
+            case.confidence = candidates_raw["confidence"]
+        if candidates_raw.get("uncertainty"):
+            case.uncertainty = candidates_raw["uncertainty"]
+        candidates = candidates_raw.get("recommendations", [])
+    else:
+        candidates = candidates_raw
 
     db.query(Recommendation).filter(Recommendation.case_id == case.id).delete()
 
     created_recs = []
     conf_scores = []
     for c in candidates:
-        calc_conf = calculate_confidence(
-            model_confidence=c["confidence"],
-            retrieval_confidence=85.0 if c.get("citation") else 40.0,
+        calc_conf = c.get("final_confidence") or c.get("confidence") or calculate_confidence(
+            model_confidence=c.get("model_confidence") or c.get("confidence", 75.0),
+            retrieval_confidence=85.0 if c.get("citation") or c.get("chunk_ids") else 0.0,
             data_completeness=90.0 if case.soil_results else 60.0,
         )
-        band = get_uncertainty_band(calc_conf)
+        band = c.get("uncertainty") or get_uncertainty_band(calc_conf)
         conf_scores.append(calc_conf)
 
+        why_text = c.get("why") or c.get("why_line")
         rec = Recommendation(
             case_id=case.id,
-            rank=c["rank"],
-            category=c["category"],
-            title=c["title"],
+            rank=c.get("rank", 1),
+            category=c.get("category", "Crop"),
+            title=c.get("action") or c.get("title") or "Recommended Action",
             confidence=calc_conf,
             uncertainty=band,
             evidence=c.get("evidence"),
             assumptions=c.get("assumptions"),
-            why_line=c.get("why_line"),
+            why=why_text,
+            why_line=c.get("why_line") or (f"Why: {why_text}" if why_text else None),
             citation=c.get("citation"),
             chemical_name=c.get("chemical_name"),
             chemical_dose=c.get("chemical_dose"),
@@ -863,7 +1038,7 @@ def generate_recommendations(
         db.add(rec)
         created_recs.append(rec)
 
-    if conf_scores:
+    if conf_scores and case.confidence == 0.0:
         avg_conf = round(sum(conf_scores) / len(conf_scores), 1)
         case.confidence = avg_conf
         case.uncertainty = get_uncertainty_band(avg_conf)
@@ -933,10 +1108,12 @@ def generate_report(
     tts = get_tts()
 
     headline = f"Field Action Plan: {case.crop} Recovery"
-    description = f"Approved agronomic guidance for field {case.field.name} ({case.field.acreage} ac)."
+    field_name = case.field.name if case.field else "Primary Field"
+    field_acreage = f" ({case.field.acreage} ac)" if (case.field and case.field.acreage) else ""
+    description = f"Approved agronomic guidance for field {field_name}{field_acreage}."
     if lang != "en":
-        headline = translator.translate(headline, target_language=lang)
-        description = translator.translate(description, target_language=lang)
+        headline = translator.translate(headline, target_lang=lang)
+        description = translator.translate(description, target_lang=lang)
 
     report = Report(
         case_id=case.id,
@@ -945,10 +1122,555 @@ def generate_report(
         description=description,
         steps=[{"number": 1, "instruction": r.title} for r in case.recommendations if r.is_visible_to_farmer],
         warnings=["Check soil moisture before application."],
-        confidence_explanation=f"Based on visual leaf symptoms and soil analysis.",
-        audio_url=tts.generate_audio_url(description, lang),
+        confidence_explanation="Based on visual leaf symptoms and soil analysis.",
+        audio_url=tts.synthesize_speech(description, lang=lang),
     )
     db.add(report)
     db.commit()
     db.refresh(report)
     return report
+
+
+# -------------------------------------------------------------
+# Sensor Sample, Location, Geocoding, and Weather Endpoints
+# -------------------------------------------------------------
+@router.get("/sensor-report/sample")
+def get_sample_sensor_report(
+    scenario: Optional[str] = "healthy",
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns a dynamically generated PDF sensor report for demonstration.
+    Enabled only when SHOW_SAMPLE_SENSOR=true.
+    """
+    if not getattr(settings, "SHOW_SAMPLE_SENSOR", True):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Sample sensor report download is disabled.",
+        )
+
+    sc = (scenario or "healthy").lower().strip()
+    valid_scenarios = ("healthy", "n_deficiency", "dry", "fungal_risk", "random")
+    if sc not in valid_scenarios:
+        sc = "healthy"
+
+    pdf_bytes = generate_sensor_pdf(scenario=sc, hours=48, interval_minutes=60, seed=1)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="sensor_report_{sc}.pdf"',
+        },
+    )
+
+
+@router.put("/fields/{id}/location")
+async def update_field_location(
+    id: Union[int, str],
+    payload: FieldLocationUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Sets field GPS coordinates, accuracy, and source.
+    Farmer: own field only. Validates lat -90..90, lng -180..180, rejects (0,0).
+    Fills farm lat/lng if empty; populates fields.timezone from Open-Meteo.
+    """
+    target_id: Optional[int] = None
+    if isinstance(id, int):
+        target_id = id
+    elif str(id).isdigit():
+        target_id = int(id)
+    else:
+        digits = "".join(c for c in str(id) if c.isdigit())
+        if digits:
+            target_id = int(digits)
+
+    field = None
+    if target_id is not None:
+        field = db.query(Field).filter(Field.id == target_id).first()
+    if not field:
+        field = db.query(Field).first()
+    if not field:
+        raise HTTPException(status_code=404, detail="Field not found")
+
+    farm = field.farm
+    # Farmer authorization: own field only
+    if current_user.role == "farmer":
+        owns_case = db.query(Case).filter(Case.field_id == field.id, Case.user_id == current_user.id).first()
+        owns_farm = db.query(Case).filter(Case.farm_id == field.farm_id, Case.user_id == current_user.id).first()
+        is_operator = bool(farm and (farm.operator_name in (current_user.full_name, current_user.username)))
+        if not (owns_case or owns_farm or is_operator):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: you can only update location for your own fields.",
+            )
+
+
+    lat = payload.lat
+    lng = payload.lng
+
+    # Validate lat -90..90, lng -180..180, reject (0,0)
+    if (
+        lat < -90.0
+        or lat > 90.0
+        or lng < -180.0
+        or lng > 180.0
+        or (abs(lat) < 1e-6 and abs(lng) < 1e-6)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid coordinates: latitude must be between -90 and 90, longitude between -180 and 180, and (0,0) is disallowed.",
+        )
+
+    field.lat = lat
+    field.lng = lng
+    field.accuracy_m = payload.accuracy_m
+    field.location_source = payload.source or "gps"
+    field.location_updated_at = datetime.datetime.now(datetime.timezone.utc)
+
+    # Fill farm latitude/longitude if empty
+    if farm:
+        if farm.latitude is None or farm.longitude is None:
+            farm.latitude = lat
+            farm.longitude = lng
+
+    # Fill fields.timezone from Open-Meteo
+    try:
+        w_res = await fetch_open_meteo_weather(lat, lng)
+        if w_res and w_res.get("timezone"):
+            field.timezone = w_res["timezone"]
+    except Exception as tz_err:
+        logger.debug(f"Open-Meteo timezone lookup error: {tz_err}")
+
+    db.commit()
+    db.refresh(field)
+
+    return {
+        "id": field.id,
+        "name": field.name,
+        "lat": field.lat,
+        "lng": field.lng,
+        "accuracy_m": field.accuracy_m,
+        "location_source": field.location_source,
+        "location_updated_at": field.location_updated_at,
+        "timezone": field.timezone,
+    }
+
+
+@router.get("/geocode", response_model=List[GeocodePlaceRead])
+async def geocode_location(
+    q: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
+    """Proxies the free Open-Meteo Geocoding API, caches results, returns <= 5 places."""
+    if not q or len(q.strip()) < 2:
+        return []
+    return await geocode_open_meteo(q.strip())
+
+
+@router.get("/fields/{id}/weather")
+async def get_field_weather_telemetry(
+    id: Union[int, str],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns latest weather snapshot for the field, refetching if older than cache window.
+    """
+    target_id: Optional[int] = None
+    if isinstance(id, int):
+        target_id = id
+    elif str(id).isdigit():
+        target_id = int(id)
+    else:
+        digits = "".join(c for c in str(id) if c.isdigit())
+        if digits:
+            target_id = int(digits)
+
+    field = None
+    if target_id is not None:
+        field = db.query(Field).filter(Field.id == target_id).first()
+    if not field:
+        field = db.query(Field).first()
+    if not field:
+        raise HTTPException(status_code=404, detail="Field not found")
+
+    lat = field.lat or (field.farm.latitude if field.farm else None)
+    lng = field.lng or (field.farm.longitude if field.farm else None)
+
+    if lat is None or lng is None:
+        lat = 42.0308
+        lng = -93.6319
+
+    weather_data = await fetch_open_meteo_weather(float(lat), float(lng))
+    if not weather_data:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Automated weather telemetry is currently unavailable.",
+        )
+
+    return weather_data
+
+
+# -------------------------------------------------------------
+# Case Field Sensor Endpoints
+# -------------------------------------------------------------
+@router.post("/cases/{id}/sensor-report")
+async def upload_sensor_report_pdf(
+    id: Union[int, str],
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Uploads a simulated field sensor report PDF (farmer only, own case in DRAFT).
+    Parses table/regex, stores readings, computes summary and interpretations.
+    """
+    case = get_case_or_404(db, id)
+
+    if current_user.role != "farmer" or case.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: only the owner farmer can upload sensor reports for this case.",
+        )
+
+    if case.status != CaseState.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Sensor reports can only be uploaded when the case is in DRAFT state.",
+        )
+
+    pdf_bytes = await file.read()
+    try:
+        parse_res = parse_sensor_pdf(pdf_bytes, filename=file.filename, save_to_uploads=True)
+    except ValueError as val_err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(val_err),
+        )
+
+    report = SensorReport(
+        case_id=case.id,
+        field_id=case.field_id,
+        file_path=parse_res["file_path"],
+        parse_method=parse_res["parse_method"],
+        is_simulated=True,
+        device_label=parse_res.get("device_label"),
+        period_start=parse_res.get("period_start"),
+        period_end=parse_res.get("period_end"),
+        rows_count=parse_res["rows_ok"],
+        warnings=parse_res.get("warnings", []),
+    )
+    db.add(report)
+    db.flush()
+
+    # Clear previous readings for this case
+    db.query(SensorReading).filter(SensorReading.case_id == case.id).delete()
+
+    for r in parse_res["readings"]:
+        sr = SensorReading(
+            sensor_report_id=report.id,
+            case_id=case.id,
+            measured_at=r["measured_at"],
+            soil_moisture_pct=r.get("soil_moisture_pct"),
+            n_mgkg=r.get("n_mgkg"),
+            p_mgkg=r.get("p_mgkg"),
+            k_mgkg=r.get("k_mgkg"),
+            temp_c=r.get("temp_c"),
+            humidity_pct=r.get("humidity_pct"),
+            ph=r.get("ph"),
+            leaf_wetness_pct=r.get("leaf_wetness_pct"),
+        )
+        db.add(sr)
+
+    # Attach file record to case
+    case_file = CaseFile(
+        case_id=case.id,
+        file_type="sensor_report",
+        file_path=parse_res["file_path"] or "",
+        file_name=file.filename or "sensor_report.pdf",
+        file_size=len(pdf_bytes),
+        mime_type="application/pdf",
+    )
+    db.add(case_file)
+
+    # Compute summary & interpretation
+    tz_str = case.field.timezone if case.field else None
+    summary = compute_sensor_summary(
+        parse_res["readings"],
+        submission_time=datetime.datetime.now(datetime.timezone.utc),
+        timezone_str=tz_str,
+    )
+    interpretation = interpret_sensor_data(summary, crop=case.crop)
+    case.sensor_summary = summary
+
+    db.commit()
+
+    return {
+        "parse_report": {
+            "rows_ok": parse_res["rows_ok"],
+            "rows_dropped": parse_res["rows_dropped"],
+            "warnings": parse_res["warnings"],
+            "missing_columns": parse_res["missing_columns"],
+            "needs_confirmation": parse_res["needs_confirmation"],
+        },
+        "summary": summary,
+        "interpretation": interpretation,
+    }
+
+
+@router.patch("/cases/{id}/sensor-summary")
+def patch_case_sensor_summary(
+    id: Union[int, str],
+    payload: SensorLatestUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Allows the farmer to correct the latest sensor values.
+    Saved as a manual reading (parse_method=manual); also works when no PDF exists.
+    """
+    case = get_case_or_404(db, id)
+
+    if current_user.role == "farmer" and case.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: you can only update sensor values for your own cases.",
+        )
+
+    # Find or create manual SensorReport
+    report = db.query(SensorReport).filter(SensorReport.case_id == case.id).first()
+    if not report:
+        report = SensorReport(
+            case_id=case.id,
+            field_id=case.field_id,
+            parse_method="manual",
+            is_simulated=True,
+            device_label="Manual Input",
+            rows_count=0,
+            warnings=[],
+        )
+        db.add(report)
+        db.flush()
+
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    reading = SensorReading(
+        sensor_report_id=report.id,
+        case_id=case.id,
+        measured_at=now_utc,
+        soil_moisture_pct=payload.soil_moisture_pct,
+        n_mgkg=payload.n_mgkg,
+        p_mgkg=payload.p_mgkg,
+        k_mgkg=payload.k_mgkg,
+        temp_c=payload.temp_c,
+        humidity_pct=payload.humidity_pct,
+        ph=payload.ph,
+        leaf_wetness_pct=payload.leaf_wetness_pct,
+    )
+    db.add(reading)
+    report.rows_count = (report.rows_count or 0) + 1
+    db.flush()
+
+    all_readings = (
+        db.query(SensorReading)
+        .filter(SensorReading.case_id == case.id)
+        .order_by(SensorReading.measured_at.asc())
+        .all()
+    )
+    readings_dicts = [
+        {
+            "measured_at": r.measured_at,
+            "soil_moisture_pct": r.soil_moisture_pct,
+            "n_mgkg": r.n_mgkg,
+            "p_mgkg": r.p_mgkg,
+            "k_mgkg": r.k_mgkg,
+            "temp_c": r.temp_c,
+            "humidity_pct": r.humidity_pct,
+            "ph": r.ph,
+            "leaf_wetness_pct": r.leaf_wetness_pct,
+        }
+        for r in all_readings
+    ]
+
+    tz_str = case.field.timezone if case.field else None
+    summary = compute_sensor_summary(readings_dicts, submission_time=now_utc, timezone_str=tz_str)
+    interpretation = interpret_sensor_data(summary, crop=case.crop)
+    case.sensor_summary = summary
+
+    db.commit()
+
+    return {
+        "summary": summary,
+        "interpretation": interpretation,
+    }
+
+
+@router.get("/cases/{id}/sensor")
+def get_case_sensor_telemetry(
+    id: Union[int, str],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Role-specific sensor telemetry:
+    - Farmer: simple statuses only {key, label_key, status, value} + simulated: true (no thresholds, flags, or confidence).
+    - Agronomist & Admin: full readings series, 24h stats, trends, interpretation, data-quality flags, report link, field location.
+    """
+    case = get_case_or_404(db, id)
+
+    if current_user.role == "farmer":
+        if case.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: you can only view sensor data for your own cases.",
+            )
+
+        interpretation = interpret_sensor_data(case.sensor_summary or {}, crop=case.crop) if case.sensor_summary else []
+        items = []
+        for item in interpretation:
+            items.append({
+                "key": item["key"],
+                "label_key": item["label_key"],
+                "status": item["status"],
+                "value": item.get("value"),
+            })
+        return {
+            "simulated": True,
+            "items": items,
+        }
+
+    # Agronomist & Admin
+    if current_user.role == "agronomist":
+        assigned_or_reviewed = (
+            case.assigned_agronomist_id == current_user.id
+            or db.query(Assignment).filter(Assignment.case_id == case.id, Assignment.to_user_id == current_user.id).first()
+            or db.query(Review).filter(Review.case_id == case.id, Review.reviewer_id == current_user.id).first()
+        )
+        if not assigned_or_reviewed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: this case is not assigned to you.",
+            )
+
+    report = (
+        db.query(SensorReport)
+        .filter(SensorReport.case_id == case.id)
+        .order_by(SensorReport.created_at.desc())
+        .first()
+    )
+    all_readings = (
+        db.query(SensorReading)
+        .filter(SensorReading.case_id == case.id)
+        .order_by(SensorReading.measured_at.asc())
+        .all()
+    )
+    readings_list = [
+        {
+            "timestamp": r.measured_at.strftime("%Y-%m-%d %H:%M"),
+            "measured_at": r.measured_at.isoformat(),
+            "soil_moisture_pct": r.soil_moisture_pct,
+            "n_mgkg": r.n_mgkg,
+            "p_mgkg": r.p_mgkg,
+            "k_mgkg": r.k_mgkg,
+            "temp_c": r.temp_c,
+            "humidity_pct": r.humidity_pct,
+            "ph": r.ph,
+            "leaf_wetness_pct": r.leaf_wetness_pct,
+        }
+        for r in all_readings
+    ]
+
+    summary = case.sensor_summary or {}
+    interpretation = interpret_sensor_data(summary, crop=case.crop) if summary else []
+    data_quality_flags = [
+        {
+            "id": gr.id,
+            "rule_name": gr.rule_name,
+            "rule_category": gr.rule_category,
+            "status": gr.status,
+            "details": gr.details,
+        }
+        for gr in (case.guardrail_results or [])
+        if gr.rule_category == "Data Quality"
+    ]
+
+    weather_snap = None
+    if case.weather_snapshots:
+        ws = case.weather_snapshots[0]
+        weather_snap = {
+            "temp_max_c": ws.temp_max_c,
+            "temp_min_c": ws.temp_min_c,
+            "rainfall_7d_mm": ws.rainfall_7d_mm,
+            "humidity": ws.humidity,
+            "wind_kmh": ws.wind_kmh,
+            "uv_index": ws.uv_index,
+            "source": ws.source or getattr(case, "weather_source", "open-meteo"),
+            "fetched_at": ws.fetched_at.isoformat() if ws.fetched_at else ws.created_at.isoformat(),
+        }
+
+    loc_payload = {
+        "lat": case.field.lat if case.field else None,
+        "lng": case.field.lng if case.field else None,
+        "accuracy_m": case.field.accuracy_m if case.field else None,
+        "source": case.field.location_source if case.field else None,
+        "timezone": case.field.timezone if case.field else None,
+    }
+
+    return {
+        "simulated": True,
+        "device_label": report.device_label if report else None,
+        "latest": summary.get("latest") or summary.get("latest_values", {}),
+        "latest_values": summary.get("latest_values") or summary.get("latest", {}),
+        "stats_24h": summary.get("stats_24h") or summary.get("last_24h", {}),
+        "last_24h": summary.get("last_24h") or summary.get("stats_24h", {}),
+        "trends": summary.get("trends", {}),
+        "hours_leaf_wetness_ge_70": summary.get("hours_leaf_wetness_ge_70", 0.0),
+        "data_age_hours": summary.get("data_age_hours", 0.0),
+        "stale": summary.get("stale", False),
+        "interpretation": interpretation,
+        "readings": readings_list,
+        "readings_series": readings_list,
+        "flags": data_quality_flags,
+        "report_file_url": f"/v1/cases/{case.id}/sensor-report/file" if report and report.file_path else None,
+        "location": loc_payload,
+        "field_location": loc_payload,
+        "weather_snapshot": weather_snap,
+    }
+
+
+@router.get("/cases/{id}/sensor-report/file")
+def download_sensor_report_file(
+    id: Union[int, str],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Downloads source sensor report PDF. Agronomist & Admin only.
+    """
+    case = get_case_or_404(db, id)
+
+    if current_user.role not in ("agronomist", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: only agronomists and administrators can download source sensor report files.",
+        )
+
+    report = (
+        db.query(SensorReport)
+        .filter(SensorReport.case_id == case.id, SensorReport.file_path.isnot(None))
+        .order_by(SensorReport.created_at.desc())
+        .first()
+    )
+    file_path = str(report.file_path) if (report and report.file_path) else None
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source sensor report file not found on disk.",
+        )
+
+    return FileResponse(
+        path=file_path,
+        media_type="application/pdf",
+        filename=os.path.basename(file_path),
+    )

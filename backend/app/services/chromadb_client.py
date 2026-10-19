@@ -3,7 +3,7 @@ ChromaDB client wrapper stub for agronomic RAG document index.
 Provides index querying and document ingestion interface.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 import logging
 
 logger = logging.getLogger("agriadvisor.chroma")

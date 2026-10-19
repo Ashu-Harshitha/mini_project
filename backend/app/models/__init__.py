@@ -6,6 +6,8 @@ from app.models.models import (
     CaseFile,
     Observation,
     SoilResult,
+    SensorReport,
+    SensorReading,
     WeatherSnapshot,
     Recommendation,
     GuardrailResult,
@@ -16,6 +18,10 @@ from app.models.models import (
     ChemicalRule,
     PromptTemplate,
     AuditLog,
+    LLMCall,
+    RAGDocument,
+    EvalCase,
+    EvalRun,
 )
 
 __all__ = [
@@ -26,6 +32,8 @@ __all__ = [
     "CaseFile",
     "Observation",
     "SoilResult",
+    "SensorReport",
+    "SensorReading",
     "WeatherSnapshot",
     "Recommendation",
     "GuardrailResult",
@@ -36,4 +44,8 @@ __all__ = [
     "ChemicalRule",
     "PromptTemplate",
     "AuditLog",
+    "LLMCall",
+    "RAGDocument",
+    "EvalCase",
+    "EvalRun",
 ]

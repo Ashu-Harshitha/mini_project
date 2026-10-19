@@ -15,7 +15,7 @@ def get_eval_overview(db: Session = Depends(get_db)):
     Computes live system evaluation metrics and calibration quality scores directly from database records.
     """
     total_cases = db.query(Case).count()
-    
+
     resolved_cases = db.query(Case).filter(
         Case.status.in_(["APPROVED", "APPROVED_WITH_EDITS", "DELIVERED", "OUTCOME_REPORTED"])
     ).count()

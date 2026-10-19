@@ -14,12 +14,17 @@ import {
   Globe,
   X,
   Sparkles,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '@/store/useAppStore';
 import { farmsApi } from '@/api/farmsApi';
 import { casesApi } from '@/api/casesApi';
 import { VoiceRecorder } from '@/components/VoiceRecorder';
+import { LocationPicker, type LocationData } from '@/components/LocationPicker';
+import { WeatherCard } from '@/components/WeatherCard';
+import { SensorReportUpload } from '@/components/SensorReportUpload';
 import { type Farm } from '@/mocks/data';
 
 export const NewCaseWizard: React.FC = () => {
@@ -32,10 +37,22 @@ export const NewCaseWizard: React.FC = () => {
   const [loadingFarms, setLoadingFarms] = useState(true);
   const [showFarmSetup, setShowFarmSetup] = useState(false);
   const [setupFarmName, setSetupFarmName] = useState('');
-  const [setupTown, setSetupTown] = useState('');
+  const [setupTown, setSetupTown] = useState('Mandya, Karnataka');
+  const [setupLat, setSetupLat] = useState<number>(12.5244);
+  const [setupLng, setSetupLng] = useState<number>(76.8958);
+  const [setupAccuracyM, setSetupAccuracyM] = useState<number | null>(null);
+  const [setupSource, setSetupSource] = useState<'gps' | 'map' | 'search'>('gps');
   const [setupCrop, setSetupCrop] = useState('Corn');
   const [setupIsOrganic, setSetupIsOrganic] = useState(false);
   const [savingFarm, setSavingFarm] = useState(false);
+
+  // Field Location Confirmation on New Case
+  const [fieldLocationConfirmed, setFieldLocationConfirmed] = useState(false);
+  const [activeFieldLocation, setActiveFieldLocation] = useState<LocationData | null>(null);
+
+  // Sensor report state
+  const [sensorPdfFile, setSensorPdfFile] = useState<File | null>(null);
+  const [manualSensorValues, setManualSensorValues] = useState<any>(null);
 
   // New Case State
   const [description, setDescription] = useState('');
@@ -43,6 +60,7 @@ export const NewCaseWizard: React.FC = () => {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [soilPdfFile, setSoilPdfFile] = useState<File | null>(null);
+  const [showMoreOptional, setShowMoreOptional] = useState(false);
   const [voiceBlob, setVoiceBlob] = useState<Blob | null>(null);
   const [voiceNotePreview, setVoiceNotePreview] = useState<string | null>(null);
   const [isVoiceActive, setIsVoiceActive] = useState(false);
@@ -65,9 +83,9 @@ export const NewCaseWizard: React.FC = () => {
             setShowFarmSetup(true);
           } else {
             setShowFarmSetup(false);
-            if (!currentFarm || !farmList.find((f) => f.id === currentFarm.id)) {
-              setCurrentFarm(farmList[0]);
-            }
+            const targetFarm = currentFarm && farmList.find((f) => f.id === currentFarm.id) ? currentFarm : farmList[0];
+            setCurrentFarm(targetFarm);
+            setFieldLocationConfirmed(true);
           }
         }
       } catch (err) {
@@ -84,60 +102,70 @@ export const NewCaseWizard: React.FC = () => {
     };
   }, []);
 
-  // Handle Quick Farm Setup
+  const selectedFarm = (farms.length > 0 && (farms.find((f) => String(f.id) === String(currentFarm?.id)) || farms[0])) || currentFarm;
+  const activeFarmId = selectedFarm?.id ? String(selectedFarm.id).replace(/\D/g, '') || '1' : '1';
+  const activeFieldId = selectedFarm?.fields?.[0]?.id ? String(selectedFarm.fields[0].id).replace(/\D/g, '') || '1' : '1';
+  const activeCrop = selectedFarm?.fields?.[0]?.currentCrop || 'Corn';
+
+  // Handle Quick Farm Setup with LocationPicker
   const handleSaveFarm = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!setupFarmName.trim() || !setupTown.trim()) {
-      setErrorMessage(t('farmer.farmSetupError', 'Please provide farm name and town/village.'));
+    if (!setupFarmName.trim()) {
+      setErrorMessage(t('farmer.farmSetupError', 'Please provide a farm name.'));
+      return;
+    }
+
+    if (!setupLat || !setupLng || (setupLat === 0 && setupLng === 0)) {
+      setErrorMessage(t('location.confirmLocationRequired', 'Please use GPS or select your field on the map.'));
       return;
     }
 
     setSavingFarm(true);
     setErrorMessage(null);
 
-    let lat = 42.0308;
-    let lon = -93.6319;
-
-    // Resolve lat/lng from free Open-Meteo Geocoding API
-    try {
-      const geoRes = await fetch(
-        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
-          setupTown.trim()
-        )}&count=1&language=en&format=json`
-      );
-      if (geoRes.ok) {
-        const geoData = await geoRes.json();
-        if (geoData.results && geoData.results.length > 0) {
-          lat = geoData.results[0].latitude;
-          lon = geoData.results[0].longitude;
-        }
-      }
-    } catch (geoErr) {
-      console.warn('Geocoding fallback used:', geoErr);
-    }
-
     try {
       const newFarm = await farmsApi.createFarm({
         name: setupFarmName.trim(),
         operator_name: user?.displayName || user?.username || 'Farmer',
-        location: setupTown.trim(),
+        location: setupTown.trim() || 'Field Location',
         total_acreage: 100,
-        latitude: lat,
-        longitude: lon,
+        latitude: setupLat,
+        longitude: setupLng,
         primary_crops: [setupCrop],
         is_organic: setupIsOrganic,
       });
 
-      // Also create default field
-      await farmsApi.createField(newFarm.id, {
+      // Also create default field with matching coordinates
+      const newField = await farmsApi.createField(newFarm.id, {
         name: 'Main Field',
         acreage: 50,
         current_crop: setupCrop,
       });
 
+      // Set field location directly
+      if (newField && newField.id) {
+        try {
+          await casesApi.updateFieldLocation(newField.id, {
+            lat: setupLat,
+            lng: setupLng,
+            accuracy_m: setupAccuracyM || undefined,
+            source: setupSource,
+          });
+        } catch (locErr) {
+          console.warn('Initial field location update:', locErr);
+        }
+      }
+
       setFarms([newFarm]);
       setCurrentFarm(newFarm);
       setShowFarmSetup(false);
+      setFieldLocationConfirmed(true);
+      setActiveFieldLocation({
+        lat: setupLat,
+        lng: setupLng,
+        accuracy_m: setupAccuracyM,
+        source: setupSource,
+      });
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to create farm profile.');
     } finally {
@@ -197,10 +225,6 @@ export const NewCaseWizard: React.FC = () => {
 
     try {
       // 1. Create case container
-      const activeFarmId = currentFarm?.id || (farms[0]?.id ? String(farms[0].id) : '1');
-      const activeFieldId = currentFarm?.fields?.[0]?.id || (farms[0]?.fields?.[0]?.id ? String(farms[0].fields[0].id) : '1');
-      const activeCrop = currentFarm?.fields?.[0]?.currentCrop || 'Corn';
-
       const created = await casesApi.createCase({
         farmId: activeFarmId,
         fieldId: activeFieldId,
@@ -209,7 +233,39 @@ export const NewCaseWizard: React.FC = () => {
         notes: effectiveDesc || 'Field inspection request',
       });
 
-      // 2. Submit farmer case (moves to PENDING_REVIEW and triggers assignment)
+      // 2. Ensure field location is saved if available from LocationPicker
+      if (activeFieldLocation && activeFieldLocation.lat && activeFieldLocation.lng) {
+        try {
+          await casesApi.updateFieldLocation(activeFieldId, {
+            lat: activeFieldLocation.lat,
+            lng: activeFieldLocation.lng,
+            accuracy_m: activeFieldLocation.accuracy_m || undefined,
+            source: activeFieldLocation.source || 'gps',
+          });
+        } catch (locErr) {
+          console.warn('Field location pre-submit update warning:', locErr);
+        }
+      }
+
+      // 3. If sensor PDF was selected, upload and parse it for this case
+      if (sensorPdfFile) {
+        try {
+          await casesApi.uploadSensorReport(created.id, sensorPdfFile);
+        } catch (sensorErr: any) {
+          console.warn('Sensor report upload warning:', sensorErr);
+        }
+      }
+
+      // If manual sensor values were updated
+      if (manualSensorValues) {
+        try {
+          await casesApi.updateSensorSummary(created.id, manualSensorValues);
+        } catch (sensorErr: any) {
+          console.warn('Manual sensor values update warning:', sensorErr);
+        }
+      }
+
+      // 4. Submit farmer case (triggers validation, weather snapshot, assignment, pipeline)
       await casesApi.submitFarmerCase(created.id, {
         description: effectiveDesc || 'Voice inquiry regarding crop health and damage.',
         language,
@@ -217,7 +273,7 @@ export const NewCaseWizard: React.FC = () => {
         soilPdf: soilPdfFile,
       });
 
-      // 3. If there was a voice note recorded, also upload as initial voice message
+      // 4. If voice note recorded, upload as voice message
       if (voiceBlob) {
         try {
           await casesApi.sendMessage(created.id, {
@@ -233,7 +289,11 @@ export const NewCaseWizard: React.FC = () => {
       navigate(`/cases/${created.id}`);
     } catch (err: any) {
       console.error('Case submission error:', err);
-      setErrorMessage(err.message || 'Failed to submit case. Please try again.');
+      if (err.message && (err.message.includes('location_required') || err.message.includes('Field or farm location'))) {
+        setErrorMessage(t('location.confirmLocationRequired', 'Field location is required. Please tap "Use My Current Location" or confirm the map pin above before submitting.'));
+      } else {
+        setErrorMessage(err.message || 'Failed to submit case. Please try again.');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -249,30 +309,32 @@ export const NewCaseWizard: React.FC = () => {
   }
 
   // ==========================================
-  // ONE-TIME QUICK FARM SETUP
+  // ONE-TIME QUICK FARM SETUP WITH LOCATION PICKER
   // ==========================================
   if (showFarmSetup) {
     return (
       <div className="max-w-xl mx-auto py-8 px-4">
-        <div className="p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-800 text-white flex items-center justify-center mb-4 shadow">
+        <div className="p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl space-y-5">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-800 text-white flex items-center justify-center shadow">
             <Sprout className="w-6 h-6 text-emerald-300" />
           </div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-            {t('farmer.quickSetupTitle', 'Quick Farm Profile Setup')}
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            {t('farmer.quickSetupDesc', 'Set up your farm once so our agronomists can assess weather and local soil conditions.')}
-          </p>
+          <div>
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+              {t('farmer.quickSetupTitle', 'Quick Farm Profile Setup')}
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              {t('farmer.quickSetupDesc', 'Set up your farm once so our agronomists can assess weather and local soil conditions.')}
+            </p>
+          </div>
 
           {errorMessage && (
-            <div className="mt-4 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2 border border-rose-200">
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2 border border-rose-200">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
               <span>{errorMessage}</span>
             </div>
           )}
 
-          <form onSubmit={handleSaveFarm} className="mt-6 space-y-4">
+          <form onSubmit={handleSaveFarm} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                 Farm Name *
@@ -287,24 +349,26 @@ export const NewCaseWizard: React.FC = () => {
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Village or Town *
+            {/* Replace old town text field with LocationPicker */}
+            <div className="space-y-1">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                Field Location & GPS *
               </label>
-              <div className="relative">
-                <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                <input
-                  type="text"
-                  value={setupTown}
-                  onChange={(e) => setSetupTown(e.target.value)}
-                  placeholder="e.g. Mandya, Karnataka"
-                  required
-                  className="w-full text-xs pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-700"
-                />
-              </div>
+              <LocationPicker
+                initialLat={setupLat}
+                initialLng={setupLng}
+                initialAccuracyM={setupAccuracyM}
+                onLocationConfirmed={(loc) => {
+                  setSetupLat(loc.lat);
+                  setSetupLng(loc.lng);
+                  setSetupAccuracyM(loc.accuracy_m || null);
+                  setSetupSource(loc.source);
+                  if (loc.name) setSetupTown(loc.name);
+                }}
+              />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3 pt-2">
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Primary Crop
@@ -367,7 +431,7 @@ export const NewCaseWizard: React.FC = () => {
   }
 
   // ==========================================
-  // ONE SIMPLE FARMER NEW CASE PAGE
+  // FARMER NEW CASE PAGE (SIMPLE & LARGE)
   // ==========================================
   return (
     <div className="max-w-2xl mx-auto py-6 px-4 pb-16 space-y-6">
@@ -387,6 +451,27 @@ export const NewCaseWizard: React.FC = () => {
           <span>{errorMessage}</span>
         </div>
       )}
+
+      {/* 1. Field Location & GPS */}
+      <LocationPicker
+        fieldId={activeFieldId}
+        onLocationConfirmed={(loc) => {
+          setFieldLocationConfirmed(true);
+          setActiveFieldLocation(loc);
+        }}
+      />
+
+      {/* 2. Automated Weather Card (Displayed after location is available) */}
+      {fieldLocationConfirmed && (
+        <WeatherCard fieldId={activeFieldId} />
+      )}
+
+      {/* 3. Simulated Field Sensor Telemetry PDF Upload Card */}
+      <SensorReportUpload
+        onSensorDataLoaded={(summary, interpretation) => {
+          setManualSensorValues(summary?.latest);
+        }}
+      />
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Main Problem Description (REQUIRED) */}
@@ -506,44 +591,56 @@ export const NewCaseWizard: React.FC = () => {
           )}
         </div>
 
-        {/* Optional Soil Report */}
-        <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <FileText className="w-4 h-4 text-indigo-600" />
-              <span>{t('farmer.uploadSoilPdf', 'Soil Test Report (Optional)')}</span>
-            </label>
-            <span className="text-[11px] text-slate-400">PDF document</span>
-          </div>
-
-          {soilPdfFile ? (
-            <div className="p-3 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 flex items-center justify-between">
-              <div className="flex items-center gap-2 truncate">
-                <FileText className="w-4 h-4 text-indigo-600 flex-shrink-0" />
-                <span className="text-xs font-semibold text-indigo-900 dark:text-indigo-300 truncate">
-                  {soilPdfFile.name}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSoilPdfFile(null)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-4 h-4" />
-              </button>
+        {/* Collapsed "More (optional)" section for legacy soil lab report */}
+        <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden shadow-xs">
+          <button
+            type="button"
+            onClick={() => setShowMoreOptional(!showMoreOptional)}
+            className="w-full p-4 flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition"
+          >
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-slate-400" />
+              <span>{t('farmer.moreOptional', 'More (Optional): Soil Lab Test Report')}</span>
             </div>
-          ) : (
-            <label className="flex flex-col items-center justify-center p-5 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition">
-              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Attach soil lab PDF (if available)
+            {showMoreOptional ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+
+          {showMoreOptional && (
+            <div className="p-5 pt-0 border-t border-slate-100 dark:border-slate-800 space-y-3">
+              <span className="text-[11px] text-slate-400">
+                Have a traditional soil chemistry report from a government or private laboratory?
               </span>
-              <input
-                type="file"
-                accept="application/pdf"
-                onChange={handleSoilPdfChange}
-                className="hidden"
-              />
-            </label>
+
+              {soilPdfFile ? (
+                <div className="p-3 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2 truncate">
+                    <FileText className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+                    <span className="text-xs font-semibold text-indigo-900 dark:text-indigo-300 truncate">
+                      {soilPdfFile.name}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSoilPdfFile(null)}
+                    className="text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <label className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Attach soil lab PDF (optional)
+                  </span>
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    onChange={handleSoilPdfChange}
+                    className="hidden"
+                  />
+                </label>
+              )}
+            </div>
           )}
         </div>
 
@@ -569,3 +666,5 @@ export const NewCaseWizard: React.FC = () => {
     </div>
   );
 };
+
+export default NewCaseWizard;

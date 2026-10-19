@@ -114,6 +114,14 @@ def assign_case(
                 sort_key = (open_count, has_assigned, last_time)
                 eligible_candidates.append((sort_key, agro))
 
+        if not eligible_candidates:
+            # Fallback: select available active agronomist with lowest open count so cases are never lost
+            for agro_id, agro in all_agronomists.items():
+                if agro_id not in exclude_ids and agro.available:
+                    open_count = get_agronomist_open_count(db, agro_id)
+                    sort_key = (open_count, 1 if agro.last_assigned_at else 0, agro.last_assigned_at or datetime.datetime.min)
+                    eligible_candidates.append((sort_key, agro))
+
         if eligible_candidates:
             eligible_candidates.sort(key=lambda x: x[0])
             selected_agronomist = eligible_candidates[0][1]

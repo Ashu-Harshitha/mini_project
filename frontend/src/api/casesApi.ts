@@ -117,6 +117,8 @@ export function mapBackendCaseToCaseItem(raw: any): CaseItem {
           evidence: r.citation || r.evidence || '',
           assumptions: r.rationale || r.assumptions || '',
           whyLine: r.tradeoffs || '',
+          citation: r.citation || '',
+          chunk_ids: r.chunk_ids || [],
         };
       })
     : base.recommendations;
@@ -181,6 +183,7 @@ export function mapBackendCaseToCaseItem(raw: any): CaseItem {
     decision_note: raw.decision_note,
     rawRecommendations: raw.recommendations,
     rawObservations: raw.observations,
+    ai_degraded: Boolean(raw.ai_degraded),
   };
 
   return mapped;
@@ -216,15 +219,29 @@ export const casesApi = {
   },
 
   async createCase(caseData: {
-    farmId?: string;
-    fieldId?: string;
+    farmId?: string | number;
+    fieldId?: string | number;
     crop?: string;
     growthStage?: string;
     notes?: string;
   }): Promise<CaseItem> {
+    let farm_id = 1;
+    let field_id = 1;
+
+    if (caseData.farmId !== undefined && caseData.farmId !== null) {
+      const digits = String(caseData.farmId).replace(/\D/g, '');
+      const parsed = parseInt(digits, 10);
+      if (!isNaN(parsed) && parsed > 0) farm_id = parsed;
+    }
+    if (caseData.fieldId !== undefined && caseData.fieldId !== null) {
+      const digits = String(caseData.fieldId).replace(/\D/g, '');
+      const parsed = parseInt(digits, 10);
+      if (!isNaN(parsed) && parsed > 0) field_id = parsed;
+    }
+
     const payload = {
-      farm_id: Number(caseData.farmId || 1),
-      field_id: Number(caseData.fieldId || 1),
+      farm_id,
+      field_id,
       crop: caseData.crop || 'Dent Corn',
       growth_stage: caseData.growthStage || 'Vegetative',
       notes: caseData.notes || 'Crop visual evaluation',
@@ -245,15 +262,28 @@ export const casesApi = {
       soilPdf?: File | null;
     }
   ): Promise<CaseItem> {
-    const formData = new FormData();
-    formData.append('description', data.description);
-    if (data.language) formData.append('language', data.language);
-    if (data.image) formData.append('image', data.image);
-    if (data.soilPdf) formData.append('soil_pdf', data.soilPdf);
+    if (data.image) {
+      try {
+        await this.uploadCaseFile(String(caseId), data.image, 'crop_image');
+      } catch (uploadErr) {
+        console.warn('Crop image upload warning:', uploadErr);
+      }
+    }
+    if (data.soilPdf) {
+      try {
+        await this.uploadCaseFile(String(caseId), data.soilPdf, 'soil_report');
+      } catch (uploadErr) {
+        console.warn('Soil report upload warning:', uploadErr);
+      }
+    }
 
+    const payload = {
+      description: data.description,
+      description_lang: data.language || 'en',
+    };
     const result = await apiClient<any>(`/cases/${caseId}/submit`, {
       method: 'POST',
-      body: formData,
+      body: JSON.stringify(payload),
     });
     return mapBackendCaseToCaseItem(result);
   },
@@ -416,4 +446,78 @@ export const casesApi = {
       }),
     });
   },
+
+  // Field Location and Weather API
+  async updateFieldLocation(
+    fieldId: string | number,
+    data: { lat: number; lng: number; accuracy_m?: number; source?: string }
+  ): Promise<any> {
+    const digits = String(fieldId).replace(/\D/g, '');
+    const cleanId = digits ? parseInt(digits, 10) : 1;
+    return apiClient<any>(`/fields/${cleanId}/location`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async geocode(query: string): Promise<Array<{
+    name: string;
+    latitude: number;
+    longitude: number;
+    country?: string;
+    admin1?: string;
+    display_name?: string;
+  }>> {
+    return apiClient<any[]>(`/geocode?q=${encodeURIComponent(query)}`);
+  },
+
+  async getFieldWeather(fieldId: string | number): Promise<any> {
+    const digits = String(fieldId).replace(/\D/g, '');
+    const cleanId = digits ? parseInt(digits, 10) : 1;
+    return apiClient<any>(`/fields/${cleanId}/weather`);
+  },
+
+  // Sensor Report Upload, Summary and Details
+  async uploadSensorReport(caseId: string | number, file: File): Promise<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return apiClient<any>(`/cases/${caseId}/sensor-report`, {
+      method: 'POST',
+      body: formData,
+    });
+  },
+
+  async updateSensorSummary(
+    caseId: string | number,
+    values: {
+      soil_moisture_pct?: number | null;
+      n_mgkg?: number | null;
+      p_mgkg?: number | null;
+      k_mgkg?: number | null;
+      temp_c?: number | null;
+      humidity_pct?: number | null;
+      ph?: number | null;
+      leaf_wetness_pct?: number | null;
+    }
+  ): Promise<any> {
+    return apiClient<any>(`/cases/${caseId}/sensor-summary`, {
+      method: 'PATCH',
+      body: JSON.stringify(values),
+    });
+  },
+
+  async getCaseSensors(caseId: string | number): Promise<any> {
+    return apiClient<any>(`/cases/${caseId}/sensor`);
+  },
+
+  getSensorSampleUrl(scenario = 'healthy'): string {
+    const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/v1';
+    return `${BASE_URL}/sensor-report/sample?scenario=${encodeURIComponent(scenario)}`;
+  },
+
+  getSensorReportFileUrl(caseId: string | number): string {
+    const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/v1';
+    return `${BASE_URL}/cases/${caseId}/sensor-report/file`;
+  },
 };
+

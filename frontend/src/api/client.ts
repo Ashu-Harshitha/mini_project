@@ -10,7 +10,14 @@ export async function apiClient<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = await getIdToken();
+  let token = await getIdToken();
+  const currentUser = useAppStore.getState().user;
+  
+  // If Firebase token is not yet initialized or in demo role mode, provide fallback token
+  if (!token && currentUser) {
+    token = `demo-${currentUser.username || currentUser.role}`;
+  }
+
   const headers = new Headers(options.headers || {});
   
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
@@ -20,31 +27,54 @@ export async function apiClient<T>(
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
+  if (currentUser?.role) {
+    headers.set('X-Demo-Role', currentUser.role);
+    headers.set('X-User-Role', currentUser.role);
+  }
 
-  const response = await fetch(`${BASE_URL}${endpoint}`, {
+  let response = await fetch(`${BASE_URL}${endpoint}`, {
     ...options,
     headers,
   });
 
-  if (!response.ok) {
-    if (response.status === 401) {
-      if (auth) {
-        await fbSignOut(auth).catch(() => {});
+  // If 401 Unauthorized, try refreshing the token once before failing
+  if (response.status === 401 && auth && auth.currentUser) {
+    try {
+      const freshToken = await getIdToken(true);
+      if (freshToken) {
+        headers.set('Authorization', `Bearer ${freshToken}`);
+        response = await fetch(`${BASE_URL}${endpoint}`, {
+          ...options,
+          headers,
+        });
       }
-      useAppStore.getState().setUser(null);
-      if (window.location.pathname !== '/') {
-        window.location.href = '/';
-      }
+    } catch {
+      // Refresh failed, proceed to error handling
     }
+  }
+
+  if (!response.ok) {
     const errorText = await response.text();
     let detail = errorText || response.statusText;
     try {
       const json = JSON.parse(errorText);
-      if (json.detail) detail = json.detail;
+      if (json.detail) {
+        if (Array.isArray(json.detail)) {
+          detail = json.detail
+            .map((d: any) => (d && typeof d === 'object' ? d.msg || d.message || JSON.stringify(d) : String(d)))
+            .join('; ');
+        } else if (typeof json.detail === 'object') {
+          detail = json.detail.message || json.detail.msg || json.detail.detail || JSON.stringify(json.detail);
+        } else {
+          detail = String(json.detail);
+        }
+      } else if (json.message) {
+        detail = String(json.message);
+      }
     } catch {
       // ignore
     }
-    const err = new Error(detail);
+    const err = new Error(String(detail));
     (err as any).status = response.status;
     throw err;
   }

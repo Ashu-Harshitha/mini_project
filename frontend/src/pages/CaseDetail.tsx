@@ -19,15 +19,21 @@ import {
   Sparkles,
   Layers,
   Languages,
+  Activity,
+  Droplets,
+  BookOpen,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '@/store/useAppStore';
 import { casesApi } from '@/api/casesApi';
+import { ragApi, type RagChunkDetail } from '@/api/ragApi';
 import { StatusBadge } from '@/components/StatusBadge';
 import { MessageThread } from '@/components/MessageThread';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { VoiceRecorder } from '@/components/VoiceRecorder';
+import { AgronomistSensorPanel } from '@/components/AgronomistSensorPanel';
 import { type CaseItem } from '@/mocks/data';
+
 
 export const CaseDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -42,13 +48,28 @@ export const CaseDetail: React.FC = () => {
   // Translation toggle for agronomist view
   const [showOriginalDesc, setShowOriginalDesc] = useState(false);
 
-  // Agronomist Decision Panel State
   const [decisionType, setDecisionType] = useState<'approve' | 'approve_with_edits' | 'reject'>('approve');
   const [decisionNote, setDecisionNote] = useState('');
   const [finalSuggestion, setFinalSuggestion] = useState('');
   const [editedRecommendations, setEditedRecommendations] = useState<Array<{ id: number; action: string }>>([]);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [submittingReview, setSubmittingReview] = useState(false);
+
+  // Citation Popover State for Agronomist Review
+  const [selectedChunk, setSelectedChunk] = useState<RagChunkDetail | null>(null);
+  const [loadingChunk, setLoadingChunk] = useState(false);
+
+  const handleOpenCitation = async (chunkId: string) => {
+    setLoadingChunk(true);
+    try {
+      const chunk = await ragApi.getChunk(chunkId);
+      setSelectedChunk(chunk);
+    } catch (e) {
+      console.error('Error fetching citation chunk:', e);
+    } finally {
+      setLoadingChunk(false);
+    }
+  };
 
   // Farmer Feedback Form State
   const [feedbackRating, setFeedbackRating] = useState(5);
@@ -58,6 +79,9 @@ export const CaseDetail: React.FC = () => {
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
+  // Field sensor state for farmer view
+  const [farmerSensors, setFarmerSensors] = useState<any>(null);
+
   const role = user?.role || 'farmer';
 
   const loadCase = async () => {
@@ -66,6 +90,11 @@ export const CaseDetail: React.FC = () => {
     try {
       const data = await casesApi.getCaseById(id);
       setCaseItem(data);
+
+      // Fetch sensor telemetry for farmer if applicable
+      if (role === 'farmer') {
+        casesApi.getCaseSensors(id).then((res) => setFarmerSensors(res)).catch(() => {});
+      }
 
       // Initialize recommendation edits if any
       if (data.rawRecommendations && Array.isArray(data.rawRecommendations)) {
@@ -83,9 +112,20 @@ export const CaseDetail: React.FC = () => {
     }
   };
 
+
   useEffect(() => {
     loadCase();
   }, [id]);
+
+  useEffect(() => {
+    const rawStatus = (caseItem?.rawStatus || caseItem?.status || '').toUpperCase();
+    if (rawStatus === 'ANALYZING') {
+      const timer = setInterval(() => {
+        loadCase();
+      }, 3000);
+      return () => clearInterval(timer);
+    }
+  }, [id, caseItem?.status, caseItem?.rawStatus]);
 
   // Handle Review Submission (Agronomist)
   const handleSubmitReview = async () => {
@@ -107,6 +147,8 @@ export const CaseDetail: React.FC = () => {
                 recommendations: editedRecommendations,
                 final_suggestion: finalSuggestion,
               }
+            : finalSuggestion
+            ? { final_suggestion: finalSuggestion }
             : undefined,
       });
       setShowConfirmModal(false);
@@ -201,6 +243,14 @@ export const CaseDetail: React.FC = () => {
           </div>
         </div>
 
+        {/* Analyzing Banner */}
+        {rawStatus === 'ANALYZING' && (
+          <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 flex items-center gap-3 shadow-sm">
+            <div className="w-5 h-5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin shrink-0" />
+            <span className="font-semibold text-sm">We are analysing your case...</span>
+          </div>
+        )}
+
         {/* 3-Step Status Timeline */}
         <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="grid grid-cols-3 gap-2 text-center relative">
@@ -275,7 +325,39 @@ export const CaseDetail: React.FC = () => {
           </p>
         </div>
 
+        {/* Farmer Sensor Telemetry Card */}
+        {farmerSensors && farmerSensors.items && farmerSensors.items.length > 0 && (
+          <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-emerald-600" />
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  Field Sensor Telemetry
+                </span>
+              </div>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                Simulated data
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+              {farmerSensors.items.map((item: any, idx: number) => (
+                <div key={idx} className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <span>{t(item.label_key as any, { defaultValue: item.key.replace('_', ' ') }) as string}</span>
+                    <span className="font-bold text-emerald-700 dark:text-emerald-400">{item.status}</span>
+                  </div>
+                  <div className="text-sm font-black text-slate-900 dark:text-white mt-1">
+                    {item.value || '--'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* BEFORE DECISION: Holding State */}
+
         {!isDecided && (
           <div className="p-8 rounded-3xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/60 dark:border-indigo-900/60 text-center space-y-3">
             <div className="w-12 h-12 rounded-full bg-indigo-600 text-white flex items-center justify-center mx-auto shadow-md">
@@ -313,6 +395,16 @@ export const CaseDetail: React.FC = () => {
                 <p className="text-xs text-rose-900 dark:text-rose-200 leading-relaxed">
                   {caseItem.decision_note || caseItem.agronomistReview?.notes || 'Inconclusive symptoms or invalid protocol.'}
                 </p>
+                {caseItem.final_suggestion && (
+                  <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-rose-200/80 dark:border-rose-900/60 shadow-xs space-y-1 mt-2">
+                    <span className="text-[11px] font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider block">
+                      Agronomist Alternative Suggestion
+                    </span>
+                    <p className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed font-medium">
+                      {caseItem.final_suggestion}
+                    </p>
+                  </div>
+                )}
                 <div className="text-[11px] text-rose-700/80 mt-2">
                   Verified by: {caseItem.assignedAgronomist || caseItem.assigned_agronomist_name || 'Extension Agronomist'}
                 </div>
@@ -466,8 +558,8 @@ export const CaseDetail: React.FC = () => {
   // ==========================================
   // AGRONOMIST & ADMIN EXPERIENCE
   // ==========================================
-  const isAssignedToMe = caseItem.assigned_agronomist_id === user?.id || role === 'admin';
-  const canReview = role === 'agronomist' && rawStatus === 'PENDING_REVIEW' && isAssignedToMe;
+  const isAssignedToMe = !caseItem.assigned_agronomist_id || caseItem.assigned_agronomist_id === user?.id || role === 'admin';
+  const canReview = role === 'agronomist' && rawStatus === 'PENDING_REVIEW';
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-20">
@@ -494,6 +586,19 @@ export const CaseDetail: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* AI Unavailable Banner */}
+      {caseItem.ai_degraded && (
+        <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 flex items-center gap-3 shadow-sm">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+          <div>
+            <div className="font-bold text-sm">AI unavailable</div>
+            <div className="text-xs text-amber-700 dark:text-amber-300">
+              Automated AI diagnostic pipeline was degraded or unavailable. Manual expert evaluation required.
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Diagnostics, Observations, Recommendations */}
@@ -555,8 +660,15 @@ export const CaseDetail: React.FC = () => {
             </div>
           </div>
 
+          {/* Field Sensors Telemetry Panel for Agronomist & Admin */}
+          <AgronomistSensorPanel
+            caseId={caseItem.id}
+            fieldId={caseItem.field_id || caseItem.fieldId || caseItem.farm?.fields?.[0]?.id}
+          />
+
           {/* Ranked Recommendations with Citations & Confidence */}
           <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
               Synthesized Recommendations & Extension Citations
             </h3>
@@ -575,11 +687,32 @@ export const CaseDetail: React.FC = () => {
                         {rec.confidence}% Conf.
                       </span>
                     </div>
-                    {rec.evidence && (
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
-                        Citation: {rec.evidence}
-                      </p>
-                    )}
+                    {/* Extension Citation Chips with Popover */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      {rec.chunk_ids && rec.chunk_ids.length > 0 ? (
+                        rec.chunk_ids.map((cid: string, cIdx: number) => (
+                          <button
+                            key={cIdx}
+                            type="button"
+                            onClick={() => handleOpenCitation(cid)}
+                            disabled={loadingChunk}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-emerald-100 hover:bg-emerald-200 text-emerald-900 dark:bg-emerald-950 dark:hover:bg-emerald-900 dark:text-emerald-300 transition shadow-xs cursor-pointer"
+                            title="Inspect grounded extension citation chunk"
+                          >
+                            <BookOpen className="w-3 h-3 text-emerald-700 dark:text-emerald-400" />
+                            <span>{rec.citation || `[Citation ${cid.slice(0, 8)}]`}</span>
+                          </button>
+                        ))
+                      ) : rec.citation ? (
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 italic">
+                          Citation: {rec.citation}
+                        </span>
+                      ) : rec.evidence ? (
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
+                          Citation: {rec.evidence}
+                        </p>
+                      ) : null}
+                    </div>
                     {rec.assumptions && (
                       <p className="text-[11px] text-slate-500 dark:text-slate-400">
                         Rationale: {rec.assumptions}
@@ -690,12 +823,28 @@ export const CaseDetail: React.FC = () => {
                   onChange={(e) => setDecisionNote(e.target.value)}
                   placeholder={
                     decisionType === 'reject'
-                      ? 'Explain why this case is rejected and what the farmer should do next...'
+                      ? 'Explain why automated advice is rejected (e.g. fertilizer burn mistaken for leaf blight)...'
                       : 'Add verification notes or instructions...'
                   }
                   className="w-full text-xs p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white resize-none"
                 />
               </div>
+
+              {/* Agronomist own suggestion if rejecting */}
+              {decisionType === 'reject' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Your Own Alternative Suggestion for the Farmer *
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={finalSuggestion}
+                    onChange={(e) => setFinalSuggestion(e.target.value)}
+                    placeholder="Enter your expert advice (e.g. Flush soil with fresh irrigation; hold off on fungicide application)..."
+                    className="w-full text-xs p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white resize-none"
+                  />
+                </div>
+              )}
 
               <button
                 type="button"
@@ -703,7 +852,7 @@ export const CaseDetail: React.FC = () => {
                 disabled={decisionType === 'reject' && decisionNote.trim().length < 10}
                 className="w-full py-3 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs shadow transition disabled:opacity-40"
               >
-                Submit Decision
+                {decisionType === 'reject' ? 'Reject & Give Your Suggestion' : decisionType === 'approve_with_edits' ? 'Approve with Edits' : 'Approve Recommendations'}
               </button>
             </div>
           )}
@@ -771,6 +920,59 @@ export const CaseDetail: React.FC = () => {
           <MessageThread caseId={caseItem.id} />
         </div>
       </div>
+
+      {/* Citation Detail Popover / Modal */}
+      {selectedChunk && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+                  {selectedChunk.source_type || 'Extension Document'}
+                </span>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white mt-1.5">
+                  {selectedChunk.title}
+                </h3>
+                <p className="text-xs text-emerald-700 dark:text-emerald-400 font-semibold mt-0.5">
+                  {selectedChunk.citation || selectedChunk.source} {selectedChunk.page ? `• Page ${selectedChunk.page}` : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedChunk(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-base font-bold p-1 rounded-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 space-y-1 border-y border-slate-100 dark:border-slate-800 py-2.5">
+              {selectedChunk.authors && <div><span className="font-semibold text-slate-700 dark:text-slate-300">Authors:</span> {selectedChunk.authors}</div>}
+              {selectedChunk.year && <div><span className="font-semibold text-slate-700 dark:text-slate-300">Year:</span> {selectedChunk.year}</div>}
+              {selectedChunk.publisher && <div><span className="font-semibold text-slate-700 dark:text-slate-300">Publisher:</span> {selectedChunk.publisher}</div>}
+            </div>
+
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                Retrieved Extension Knowledge Chunk
+              </span>
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80 text-xs text-slate-800 dark:text-slate-200 max-h-60 overflow-y-auto leading-relaxed whitespace-pre-wrap">
+                {selectedChunk.text}
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={() => setSelectedChunk(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-800 hover:bg-emerald-900 text-white shadow-xs transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

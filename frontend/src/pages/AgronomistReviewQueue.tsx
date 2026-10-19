@@ -150,6 +150,17 @@ export const AgronomistReviewQueue: React.FC = () => {
                           High-Risk Flagged
                         </span>
                       )}
+                      {(!c.assigned_agronomist_id && !c.assignedAgronomist) && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300">
+                          Open Queue Pool
+                        </span>
+                      )}
+                      {(c as any).ai_degraded && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300">
+                          <AlertTriangle className="w-3 h-3 text-rose-600" />
+                          AI unavailable
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-1">
@@ -159,7 +170,7 @@ export const AgronomistReviewQueue: React.FC = () => {
                       </span>
                       <span className="flex items-center gap-1">
                         <Clock className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Assigned {age}</span>
+                        <span>{c.assigned_at ? `Assigned ${age}` : `Submitted ${age}`}</span>
                       </span>
                     </div>
 
@@ -178,7 +189,7 @@ export const AgronomistReviewQueue: React.FC = () => {
                     }}
                     className="px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs shadow flex items-center gap-1.5 transition"
                   >
-                    <span>Review Case</span>
+                    <span>{(!c.assigned_agronomist_id && !c.assignedAgronomist) ? 'Claim & Review' : 'Review Case'}</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 </div>

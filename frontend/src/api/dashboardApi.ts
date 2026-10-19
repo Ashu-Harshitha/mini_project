@@ -4,7 +4,7 @@ export interface FarmerSummary {
   role: 'farmer';
   open_cases: number;
   awaiting_review: number;
-  latest_decision: string | null;
+  latest_decision: string | { case_id?: number; case_number?: string; status?: string; date?: string } | null;
   unread_notifications: number;
 }
 

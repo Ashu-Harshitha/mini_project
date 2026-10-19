@@ -1,6 +1,4 @@
-import os
-from typing import List, Union
-from pydantic import AnyHttpUrl, field_validator
+from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +39,18 @@ class Settings(BaseSettings):
     # Guardrail Thresholds
     AUTO_APPROVE_CONFIDENCE_THRESHOLD: float = 80.0
     MIN_FARMER_VISIBLE_CONFIDENCE: float = 50.0
+
+    # Field Sensors & Weather
+    SENSOR_STALE_HOURS: int = 48
+    SHOW_SAMPLE_SENSOR: bool = True
+    LOCATION_MAX_ACCURACY_M: float = 100.0
+    WEATHER_CACHE_MINUTES: int = 30
+    MAX_SENSOR_PDF_MB: float = 5.0
+
+    # RAG & ChromaDB
+    CHROMA_PATH: str = "./data/chroma"
+    RAG_TOP_K: int = 4
+    RAG_MIN_RELEVANCE: float = 30.0
     
     # CORS
     CORS_ORIGINS: List[str] = [

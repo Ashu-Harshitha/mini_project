@@ -107,7 +107,7 @@ export interface CaseItem {
 
 export const mockFarms: Farm[] = [
   {
-    id: 'westfield',
+    id: '1',
     name: 'Westfield Farm',
     operator: 'James Donovan',
     location: 'Ames, Iowa 50011',
@@ -115,13 +115,13 @@ export const mockFarms: Farm[] = [
     primaryCrops: ['Corn', 'Soybean'],
     irrigationSystem: 'Center pivot',
     fields: [
-      { id: 'f-1', name: 'North 40 — Block C', acreage: 38, soilType: 'Silty clay loam', currentCrop: 'Dent Corn', cropVariety: 'Pioneer P1197AM', lastFertilizer: 'Apr 30 — 120 lb/ac anhydrous NH3' },
-      { id: 'f-2', name: 'South 80', acreage: 80, soilType: 'Silt loam', currentCrop: 'Soybean', cropVariety: 'Asgrow A2834', lastFertilizer: 'May 10 — Inoculant & P/K' },
-      { id: 'f-3', name: 'Creek Bottom', acreage: 24, soilType: 'Clay', currentCrop: 'Fallow', lastFertilizer: 'None' },
+      { id: '1', name: 'North 40 — Block C', acreage: 38, soilType: 'Silty clay loam', currentCrop: 'Dent Corn', cropVariety: 'Pioneer P1197AM', lastFertilizer: 'Apr 30 — 120 lb/ac anhydrous NH3' },
+      { id: '2', name: 'South 80', acreage: 80, soilType: 'Silt loam', currentCrop: 'Soybean', cropVariety: 'Asgrow A2834', lastFertilizer: 'May 10 — Inoculant & P/K' },
+      { id: '3', name: 'Creek Bottom', acreage: 24, soilType: 'Clay', currentCrop: 'Fallow', lastFertilizer: 'None' },
     ],
   },
   {
-    id: 'oakridge',
+    id: '2',
     name: 'Oakridge Ranch',
     operator: 'Elena Martinez',
     location: 'Boone, Iowa 50036',
@@ -129,12 +129,12 @@ export const mockFarms: Farm[] = [
     primaryCrops: ['Soybean', 'Alfalfa'],
     irrigationSystem: 'Drip & Pivot',
     fields: [
-      { id: 'o-1', name: 'West Valley 120', acreage: 120, soilType: 'Loam', currentCrop: 'Soybean' },
-      { id: 'o-2', name: 'Prairie East', acreage: 95, soilType: 'Sandy loam', currentCrop: 'Alfalfa' },
+      { id: '4', name: 'West Valley 120', acreage: 120, soilType: 'Loam', currentCrop: 'Soybean' },
+      { id: '5', name: 'Prairie East', acreage: 95, soilType: 'Sandy loam', currentCrop: 'Alfalfa' },
     ],
   },
   {
-    id: 'maplegrove',
+    id: '3',
     name: 'Maple Grove',
     operator: 'Marcus Vance',
     location: 'Story City, Iowa 50248',
@@ -142,8 +142,8 @@ export const mockFarms: Farm[] = [
     primaryCrops: ['Corn', 'Cotton'],
     irrigationSystem: 'Rain-fed / Pivot',
     fields: [
-      { id: 'm-1', name: 'River Flats', acreage: 64, soilType: 'Alluvial silt', currentCrop: 'Corn' },
-      { id: 'm-2', name: 'Ridge Top 45', acreage: 45, soilType: 'Clay loam', currentCrop: 'Cotton' },
+      { id: '6', name: 'River Flats', acreage: 64, soilType: 'Alluvial silt', currentCrop: 'Corn' },
+      { id: '7', name: 'Ridge Top 45', acreage: 45, soilType: 'Clay loam', currentCrop: 'Cotton' },
     ],
   },
 ];

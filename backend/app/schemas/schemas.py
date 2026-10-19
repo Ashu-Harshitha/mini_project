@@ -110,6 +110,68 @@ class FieldBase(BaseModel):
     current_crop: Optional[str] = "Dent Corn"
     crop_variety: Optional[str] = None
     last_fertilizer: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    accuracy_m: Optional[float] = None
+    location_source: Optional[str] = None
+    location_updated_at: Optional[datetime.datetime] = None
+    timezone: Optional[str] = None
+
+
+class FieldLocationUpdate(BaseModel):
+    lat: float
+    lng: float
+    accuracy_m: Optional[float] = None
+    source: Optional[str] = "gps"
+
+
+class SensorLatestUpdate(BaseModel):
+    soil_moisture_pct: Optional[float] = None
+    n_mgkg: Optional[float] = None
+    p_mgkg: Optional[float] = None
+    k_mgkg: Optional[float] = None
+    temp_c: Optional[float] = None
+    humidity_pct: Optional[float] = None
+    ph: Optional[float] = None
+    leaf_wetness_pct: Optional[float] = None
+
+
+class GeocodePlaceRead(BaseModel):
+    name: str
+    admin1: Optional[str] = None
+    country: Optional[str] = None
+    latitude: float
+    longitude: float
+    timezone: Optional[str] = None
+
+
+class SensorStatusItem(BaseModel):
+    key: str
+    label_key: str
+    status: str
+    value: Optional[float] = None
+
+
+class FarmerSensorRead(BaseModel):
+    simulated: bool = True
+    items: List[SensorStatusItem]
+
+
+class AgronomistSensorRead(BaseModel):
+    simulated: bool = True
+    device_label: Optional[str] = None
+    latest_values: Dict[str, Any] = {}
+    last_24h: Dict[str, Any] = {}
+    trends: Dict[str, str] = {}
+    hours_leaf_wetness_ge_70: float = 0.0
+    data_age_hours: float = 0.0
+    stale: bool = False
+    interpretation: List[Dict[str, Any]] = []
+    readings: List[Dict[str, Any]] = []
+    flags: List[Dict[str, Any]] = []
+    report_file_url: Optional[str] = None
+    field_location: Optional[Dict[str, Any]] = None
+    weather_snapshot: Optional[Dict[str, Any]] = None
 
 
 class FieldCreate(FieldBase):
@@ -208,6 +270,11 @@ class SoilResultBase(BaseModel):
     phosphorus_ppm: Optional[float] = None
     potassium_ppm: Optional[float] = None
     ph: Optional[float] = None
+    n_ppm: Optional[float] = None
+    p_ppm: Optional[float] = None
+    k_ppm: Optional[float] = None
+    sample_date: Optional[str] = None
+    needs_confirmation: bool = False
     organic_matter_pct: Optional[float] = None
     cation_exchange_capacity: Optional[float] = None
     micronutrients: Optional[Dict[str, Any]] = None
@@ -217,9 +284,24 @@ class SoilResultCreate(SoilResultBase):
     pass
 
 
+class SoilPatch(BaseModel):
+    n_ppm: Optional[float] = None
+    p_ppm: Optional[float] = None
+    k_ppm: Optional[float] = None
+    ph: Optional[float] = Field(None, ge=3.0, le=10.0)
+    sample_date: Optional[str] = None
+    needs_confirmation: Optional[bool] = None
+
+
 class SoilResultRead(SoilResultBase):
     id: int
     case_id: int
+    n_value: Optional[str] = None
+    n_status: Optional[str] = None
+    ph_value: Optional[str] = None
+    ph_status: Optional[str] = None
+    pk_value: Optional[str] = None
+    pk_status: Optional[str] = None
     created_at: datetime.datetime
 
     class Config:
@@ -232,11 +314,15 @@ class WeatherSnapshotRead(BaseModel):
     temp_max_c: Optional[float] = None
     temp_min_c: Optional[float] = None
     rainfall_7d_mm: Optional[float] = None
-    humidity: Optional[int] = None
+    humidity: Optional[float] = None
     wind_kmh: Optional[float] = None
     uv_index: Optional[float] = None
     rainfall_status: Optional[str] = None
     temp_status: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    fetched_at: Optional[datetime.datetime] = None
+    source: Optional[str] = None
     raw_data: Optional[Dict[str, Any]] = None
     created_at: datetime.datetime
 
@@ -278,6 +364,13 @@ class RecommendationRead(BaseModel):
     chemical_name: Optional[str] = None
     chemical_dose: Optional[float] = None
     chemical_unit: Optional[str] = None
+    category: Optional[str] = None
+    why: Optional[str] = None
+    why_line: Optional[str] = None
+    evidence: Optional[str] = None
+    assumptions: Optional[str] = None
+    citation: Optional[str] = None
+    chunk_ids: Optional[List[Union[str, int]]] = None
     created_at: datetime.datetime
 
     def model_post_init(self, __context: Any) -> None:
@@ -407,6 +500,9 @@ class CaseRead(BaseModel):
     farmer_summary: Optional[str] = None
     final_suggestion: Optional[str] = None
     decision_note: Optional[str] = None
+    issue_label: Optional[str] = None
+    issue_category: Optional[str] = None
+    ai_degraded: bool = False
     farm: Optional[FarmRead] = None
     field: Optional[FieldRead] = None
     created_at: datetime.datetime
@@ -485,6 +581,30 @@ class AdminAgronomistRead(BaseModel):
     max_open_cases: int
     total_reviewed: int
     avg_feedback_rating: float
+    accepted_count: int = 0
+    accepted_with_edits_count: int = 0
+    rejected_count: int = 0
+    positive_reviews_count: int = 0
+    negative_reviews_count: int = 0
+
+
+class AdminCaseRead(BaseModel):
+    id: int
+    case_number: str
+    farmer_id: int
+    farmer_name: Optional[str] = None
+    status: str
+    crop: str
+    description: Optional[str] = None
+    assigned_agronomist_id: Optional[int] = None
+    assigned_agronomist_name: Optional[str] = None
+    assigned_at: Optional[datetime.datetime] = None
+    decision_note: Optional[str] = None
+    final_suggestion: Optional[str] = None
+    farmer_feedback_rating: Optional[int] = None
+    farmer_feedback_comment: Optional[str] = None
+    reassign_count: int = 0
+    created_at: datetime.datetime
 
 
 class AdminAgronomistUpdate(BaseModel):
@@ -554,6 +674,8 @@ class PromptTemplateUpdate(BaseModel):
 class PromptTemplateRead(BaseModel):
     id: int
     step: str
+    version: int = 1
+    is_active: bool = True
     title: str
     subtitle: Optional[str] = None
     template: str

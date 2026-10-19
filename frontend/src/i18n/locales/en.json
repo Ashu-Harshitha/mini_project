@@ -198,8 +198,66 @@
     "quickSetupTitle": "Quick Farm Profile Setup",
     "quickSetupDesc": "Set up your farm once so our agronomists can assess weather and local soil conditions.",
     "farmSetupError": "Please provide farm name and town/village.",
+    "moreOptional": "More (Optional): Soil Lab Test Report",
     "voiceNoteAttached": "[Voice note attached. Farmer described crop symptoms via audio]",
     "minDescLength": "Please describe the problem in at least 10 characters or record a voice note."
+  },
+  "location": {
+    "fieldLocation": "Field Location",
+    "neededForWeather": "Required for live rainfall, temperature, and local crop advisory",
+    "confirmedSuccess": "Location Confirmed",
+    "useGps": "Use My Current Location",
+    "gettingLocation": "Acquiring GPS fix (high accuracy)...",
+    "timeoutRetry": "GPS timed out. Retrying with cell/network location...",
+    "permissionDenied": "Location access was denied. Please allow GPS permissions in your browser or search your village below.",
+    "positionUnavailable": "Position is currently unavailable. Please search for your village or tap your field on the map.",
+    "timeout": "GPS request timed out. Please search for your nearest town or pin your field manually.",
+    "insecureContext": "GPS location requires a secure HTTPS connection. Please search your village or pin your field on the map.",
+    "unknownError": "Could not detect position. Please use the search bar or map.",
+    "lowAccuracyWarning": "GPS accuracy is low. Move the pin to your exact field on the map.",
+    "searchPlaceholder": "Or search village, town, or district...",
+    "searchBtn": "Search",
+    "noResults": "No places found. Try a different town or village name.",
+    "searchFailed": "Place search is temporarily unavailable. Please tap the map.",
+    "loadingMap": "Loading satellite map...",
+    "dragPinHint": "Drag the green pin or tap anywhere to fine-tune your field boundary.",
+    "confirmLocation": "Confirm Field Location",
+    "confirmLocationRequired": "Field location is required. Please tap 'Use My Current Location' or confirm the map pin above before submitting."
+  },
+  "weather": {
+    "title": "Automated Field Weather",
+    "source": "Source: Open-Meteo High-Resolution Telemetry",
+    "refresh": "Refresh",
+    "fetchError": "Live weather telemetry could not be updated right now.",
+    "temp": "Air Temp",
+    "humidity": "Humidity",
+    "rain7d": "7-Day Rain",
+    "wind": "Wind",
+    "updatedAt": "Updated at",
+    "noManualEntry": "Values fetched automatically via field GPS"
+  },
+  "sensors": {
+    "title": "Simulated Field Sensor Telemetry",
+    "simulatedBadge": "Simulated data",
+    "subtitle": "Upload AgriAdvisor sensor kit report PDF or generate a test scenario",
+    "downloadSample": "Sample PDF",
+    "pdfOnlyError": "Please upload a PDF document.",
+    "pdfSizeError": "File exceeds 5 MB limit.",
+    "parseError": "Could not read the sensor PDF. You can enter or correct the values manually below.",
+    "readingReport": "Reading and validating sensor PDF...",
+    "dragDropPdf": "Drag & drop field sensor PDF here, or click to browse",
+    "weReadYourReport": "We read your sensor report",
+    "somethingWrong": "Something wrong? Edit values",
+    "manualFormTitle": "Manual Sensor Readings Correction",
+    "saveChanges": "Save Sensor Values",
+    "soil_moisture": "Soil Moisture",
+    "nitrogen": "Nitrogen (N)",
+    "phosphorus": "Phosphorus (P)",
+    "potassium": "Potassium (K)",
+    "temp_c": "Air Temperature",
+    "humidity": "Air Humidity",
+    "ph": "Soil pH",
+    "leaf_wetness": "Leaf Wetness"
   },
   "voice": {
     "spokenLanguage": "Voice Language",
@@ -230,3 +288,4 @@
     "viewAll": "View All"
   }
 }
+

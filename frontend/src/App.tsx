@@ -78,6 +78,8 @@ export const App: React.FC = () => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
         try {
+          // Force refresh token on session restoration so stale cached tokens never trigger 401
+          await fbUser.getIdToken(true);
           const me = await authApi.getMe();
           const initials = (me.full_name || me.username || 'User')
             .split(' ')
@@ -102,11 +104,14 @@ export const App: React.FC = () => {
             setLanguage(me.language as any);
           }
         } catch (err) {
-          console.warn('Failed to load user session profile:', err);
-          setUser(null);
+          console.warn('Failed to load user session profile from backend:', err);
+          // Keep existing session in store if present (e.g. demo mode / offline)
         }
       } else {
-        setUser(null);
+        // Only clear user if no local persistent session exists
+        if (!localStorage.getItem('agri_user')) {
+          setUser(null);
+        }
       }
       setIsAuthResolved(true);
     });

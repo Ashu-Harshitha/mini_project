@@ -18,6 +18,7 @@ from app.api.routes import (
     notifications,
     eval,
     dashboard,
+    rag,
 )
 from app.scripts.seed import seed_database
 from app.services.assignment import check_case_assignment_timeouts
@@ -132,6 +133,8 @@ app.include_router(notifications.router, prefix=api_prefix)
 app.include_router(eval.router, prefix=api_prefix)
 app.include_router(dashboard.router, prefix=api_prefix)
 app.include_router(dashboard.router)
+app.include_router(rag.router, prefix=api_prefix)
+app.include_router(rag.router)
 
 
 @app.get("/health", tags=["Health"])

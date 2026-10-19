@@ -68,7 +68,27 @@ export const Dashboard: React.FC = () => {
   if (role === 'farmer') {
     const openCases = summary?.open_cases ?? recentCases.filter((c) => c.status !== 'Resolved').length;
     const awaitingReview = summary?.awaiting_review ?? recentCases.filter((c) => c.status === 'Review').length;
-    const latestAdvice = summary?.latest_decision ?? (recentCases.find((c) => c.status === 'Resolved')?.summary || 'No advice yet');
+
+    let latestAdviceText = 'No advice yet';
+    let latestCaseId: string | number | null = null;
+
+    if (summary?.latest_decision) {
+      if (typeof summary.latest_decision === 'string') {
+        latestAdviceText = summary.latest_decision;
+      } else if (typeof summary.latest_decision === 'object') {
+        const caseNum = summary.latest_decision.case_number || 'Case';
+        const st = summary.latest_decision.status ? String(summary.latest_decision.status).replace(/_/g, ' ') : 'Approved';
+        latestAdviceText = `${caseNum} (${st})`;
+        latestCaseId = summary.latest_decision.case_id || null;
+      }
+    } else {
+      const resolved = recentCases.find((c) => c.status === 'Resolved');
+      if (resolved) {
+        latestAdviceText = resolved.summary || `Case ${resolved.caseNumber} resolved`;
+        latestCaseId = resolved.id;
+      }
+    }
+
     const unreadCount = summary?.unread_notifications ?? 0;
 
     return (
@@ -148,9 +168,18 @@ export const Dashboard: React.FC = () => {
                 <CheckCircle2 className="w-5 h-5" />
               </div>
             </div>
-            <div className="mt-2 text-xs font-medium text-slate-700 dark:text-slate-300 line-clamp-2">
-              {latestAdvice}
-            </div>
+            {latestCaseId ? (
+              <Link
+                to={`/cases/${latestCaseId}`}
+                className="mt-2 text-xs font-medium text-slate-700 dark:text-slate-300 line-clamp-2 hover:text-emerald-700 dark:hover:text-emerald-400 hover:underline block"
+              >
+                {latestAdviceText}
+              </Link>
+            ) : (
+              <div className="mt-2 text-xs font-medium text-slate-700 dark:text-slate-300 line-clamp-2">
+                {latestAdviceText}
+              </div>
+            )}
             <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold mt-1">
               Agronomist verified
             </span>

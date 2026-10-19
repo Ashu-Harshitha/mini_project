@@ -1,0 +1,9 @@
+# Chroma database persistence
+data/chroma/
+backend/data/chroma/
+*.sqlite
+*.sqlite3
+__pycache__/
+*.pyc
+secrets/
+uploads/

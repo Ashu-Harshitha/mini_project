@@ -41,6 +41,9 @@ services:
       - AI_MODE=mock
       - CHROMA_HOST=chroma
       - CHROMA_PORT=8000
+      - CHROMA_PATH=/app/data/chroma
+      - RAG_TOP_K=4
+      - RAG_MIN_RELEVANCE=30.0
     depends_on:
       postgres:
         condition: service_healthy
@@ -48,7 +51,10 @@ services:
         condition: service_started
     volumes:
       - ./uploads:/app/uploads
+      - chroma_data:/app/data/chroma
+      - embedding_cache:/root/.cache
 
 volumes:
   postgres_data:
   chroma_data:
+  embedding_cache:

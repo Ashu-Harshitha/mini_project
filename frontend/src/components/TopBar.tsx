@@ -146,7 +146,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onMobileMenuToggle }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const models = ['GPT-4o', 'Claude 3.5 Sonnet', 'Gemini 1.5 Pro', 'Llama 3.1 70B'];
+  const models = ['Gemini 2.5 Flash', 'GPT-4o', 'Claude 3.5 Sonnet', 'Gemini 1.5 Pro', 'Llama 3.1 70B'];
   const languages = [
     { code: 'en', label: 'English' },
     { code: 'hi', label: 'हिंदी (Hindi)' },

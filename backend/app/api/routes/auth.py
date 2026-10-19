@@ -3,7 +3,6 @@ import time
 import logging
 from collections import defaultdict
 from threading import Lock
-from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -15,6 +14,8 @@ from app.schemas.schemas import (
     UserRegister,
     UserRegisterResponse,
     UserMe,
+    AvailabilityUpdate,
+    LanguageUpdate,
 )
 from app.api.deps import get_current_user
 from app.auth.firebase_client import get_firebase, FirebaseClient

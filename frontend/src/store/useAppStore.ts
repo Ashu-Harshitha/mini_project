@@ -45,14 +45,23 @@ interface AppState {
   toggleSidebar: () => void;
 }
 
+const getInitialUser = (): AppUser | null => {
+  try {
+    const raw = localStorage.getItem('agri_user');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
 export const useAppStore = create<AppState>((set, get) => ({
   theme: (localStorage.getItem('agri_theme') as 'light' | 'dark') || 'light',
   currentFarm: mockFarms[0],
-  currentModel: 'GPT-4o',
+  currentModel: 'Gemini 2.5 Flash',
   unitSystem: (localStorage.getItem('agri_units') as UnitSystem) || 'imperial',
   language: (localStorage.getItem('agri_lang') as 'en' | 'hi' | 'kn') || 'en',
-  user: null,
-  isAuthResolved: false,
+  user: getInitialUser(),
+  isAuthResolved: Boolean(getInitialUser()),
   isOnline: navigator.onLine,
   offlineCount: getOfflineDrafts().length,
   sidebarCollapsed: false,
@@ -92,36 +101,39 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ language: lang });
   },
 
-  setUser: (user) => set({ user }),
+  setUser: (user) => {
+    if (user) {
+      localStorage.setItem('agri_user', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('agri_user');
+    }
+    set({ user });
+  },
   setIsAuthResolved: (isAuthResolved) => set({ isAuthResolved }),
 
   switchRole: (role) => {
+    const roleIdMap: Record<UserRole, number> = {
+      farmer: 1,
+      agronomist: 2,
+      admin: 3,
+    };
     const names: Record<UserRole, { name: string; initials: string; email: string }> = {
       farmer: { name: 'James Donovan', initials: 'JD', email: 'james@westfieldagri.com' },
       agronomist: { name: 'Dr. Sarah Chen', initials: 'SC', email: 'schen@iastate.edu' },
       admin: { name: 'Administrator', initials: 'AD', email: 'admin@agriadvisor.ai' },
     };
     const details = names[role];
-    const current = get().user;
-    if (current) {
-      set({
-        user: {
-          ...current,
-          role,
-        },
-      });
-    } else {
-      set({
-        user: {
-          uid: `usr-${role}`,
-          username: role,
-          email: details.email,
-          displayName: details.name,
-          role,
-          avatarInitials: details.initials,
-        },
-      });
-    }
+    const newUser: AppUser = {
+      id: roleIdMap[role],
+      uid: `usr-${role}`,
+      username: role,
+      email: details.email,
+      displayName: details.name,
+      role,
+      avatarInitials: details.initials,
+    };
+    localStorage.setItem('agri_user', JSON.stringify(newUser));
+    set({ user: newUser });
   },
 
   setIsOnline: (isOnline) => set({ isOnline }),

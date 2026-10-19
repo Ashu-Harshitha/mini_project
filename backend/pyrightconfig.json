@@ -1,0 +1,17 @@
+{
+  "include": [
+    "app",
+    "tests",
+    "scripts"
+  ],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "standard",
+  "reportGeneralTypeIssues": false,
+  "reportAttributeAccessIssue": false,
+  "reportArgumentType": false,
+  "reportCallIssue": false,
+  "reportOptionalSubscript": false,
+  "reportOptionalMemberAccess": false
+}

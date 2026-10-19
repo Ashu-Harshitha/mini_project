@@ -7,40 +7,51 @@ from app.services.ai.mock_service import (
     MockTranslator,
     MockTTS,
 )
+from app.services.ai.gemini_service import (
+    GeminiImageAnalyzer,
+    GeminiRecommender,
+)
 from app.services.ai.openai_service import (
     OpenAIImageAnalyzer,
     OpenAIRecommender,
-    OpenAIRetriever,
     OpenAITranslator,
     OpenAITTS,
 )
 
 
 def get_image_analyzer() -> ImageAnalyzer:
-    if settings.AI_MODE == "openai":
+    mode = settings.AI_MODE.lower()
+    if mode == "gemini":
+        return GeminiImageAnalyzer()
+    elif mode == "openai":
         return OpenAIImageAnalyzer()
     return MockImageAnalyzer()
 
 
 def get_recommender() -> Recommender:
-    if settings.AI_MODE == "openai":
+    mode = settings.AI_MODE.lower()
+    if mode == "gemini":
+        return GeminiRecommender()
+    elif mode == "openai":
         return OpenAIRecommender()
     return MockRecommender()
 
 
 def get_retriever() -> Retriever:
-    if settings.AI_MODE == "openai":
-        return OpenAIRetriever()
-    return MockRetriever()
+    try:
+        from app.rag.retriever import ChromaRetriever
+        return ChromaRetriever()
+    except Exception:
+        return MockRetriever()
 
 
 def get_translator() -> Translator:
-    if settings.AI_MODE == "openai":
+    if settings.AI_MODE.lower() == "openai":
         return OpenAITranslator()
     return MockTranslator()
 
 
 def get_tts() -> TTS:
-    if settings.AI_MODE == "openai":
+    if settings.AI_MODE.lower() == "openai":
         return OpenAITTS()
     return MockTTS()

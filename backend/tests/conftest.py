@@ -88,9 +88,15 @@ class FakeFirebaseClient:
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_db():
+    from app.core.config import settings
+    from app.services.ai.gemini_client import get_gemini_client
+    orig_mode = settings.AI_MODE
+    settings.AI_MODE = "mock"
+    get_gemini_client().ai_mode = "mock"
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)
+    settings.AI_MODE = orig_mode
 
 
 @pytest.fixture

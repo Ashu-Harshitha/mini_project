@@ -82,11 +82,18 @@ class Field(Base):
     current_crop = Column(String(100), nullable=True)
     crop_variety = Column(String(100), nullable=True)
     last_fertilizer = Column(String(255), nullable=True)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    accuracy_m = Column(Float, nullable=True)
+    location_source = Column(String(50), nullable=True)  # gps|map|search
+    location_updated_at = Column(DateTime, nullable=True)
+    timezone = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
 
     farm = relationship("Farm", back_populates="fields")
     cases = relationship("Case", back_populates="field")
+    sensor_reports = relationship("SensorReport", back_populates="field", cascade="all, delete-orphan")
 
 
 class Case(Base):
@@ -112,6 +119,12 @@ class Case(Base):
     farmer_summary = Column(Text, nullable=True)
     final_suggestion = Column(Text, nullable=True)
     decision_note = Column(Text, nullable=True)
+    issue_label = Column(Text, nullable=True)
+    issue_category = Column(String(50), nullable=True)  # nitrogen_deficiency|nutrient_other|fungal_disease|bacterial_disease|pest_damage|water_stress|weed_pressure|healthy|other
+    ai_degraded = Column(Boolean, default=False, nullable=False)
+    sensor_summary = Column(JSON, nullable=True)
+    location_snapshot = Column(JSON, nullable=True)  # {lat, lng, accuracy_m, source}
+    weather_source = Column(String(50), nullable=True, default="none")  # api|none
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
 
@@ -122,6 +135,8 @@ class Case(Base):
     files = relationship("CaseFile", back_populates="case", cascade="all, delete-orphan")
     observations = relationship("Observation", back_populates="case", cascade="all, delete-orphan")
     soil_results = relationship("SoilResult", back_populates="case", cascade="all, delete-orphan")
+    sensor_reports = relationship("SensorReport", back_populates="case", cascade="all, delete-orphan")
+    sensor_readings = relationship("SensorReading", back_populates="case", cascade="all, delete-orphan")
     weather_snapshots = relationship("WeatherSnapshot", back_populates="case", cascade="all, delete-orphan")
     recommendations = relationship("Recommendation", back_populates="case", cascade="all, delete-orphan")
     guardrail_results = relationship("GuardrailResult", back_populates="case", cascade="all, delete-orphan")
@@ -175,6 +190,12 @@ class SoilResult(Base):
     ph_citation = Column(String(255), nullable=True)
     pk_value = Column(String(100), default="Optimal")
     pk_status = Column(String(50), default="Adequate")
+    n_ppm = Column(Float, nullable=True)
+    p_ppm = Column(Float, nullable=True)
+    k_ppm = Column(Float, nullable=True)
+    ph = Column(Float, nullable=True)
+    sample_date = Column(String(50), nullable=True)
+    needs_confirmation = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 
     case = relationship("Case", back_populates="soil_results")
@@ -193,10 +214,58 @@ class WeatherSnapshot(Base):
     uv_index = Column(Float, nullable=False)
     rainfall_status = Column(String(50), default="Below Average")
     temp_status = Column(String(50), default="Optimal")
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    fetched_at = Column(DateTime, nullable=True)
+    source = Column(String(50), nullable=True, default="open-meteo")
     raw_data = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 
     case = relationship("Case", back_populates="weather_snapshots")
+
+
+class SensorReport(Base):
+    __tablename__ = "sensor_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(Integer, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    field_id = Column(Integer, ForeignKey("fields.id", ondelete="CASCADE"), nullable=True)
+    file_path = Column(String(500), nullable=True)
+    parse_method = Column(String(50), nullable=False)  # regex|table|gemini|manual
+    is_simulated = Column(Boolean, default=True, nullable=False)
+    device_label = Column(String(100), nullable=True)
+    period_start = Column(DateTime, nullable=True)
+    period_end = Column(DateTime, nullable=True)
+    rows_count = Column(Integer, default=0, nullable=False)
+    warnings = Column(JSON, nullable=True, default=list)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    case = relationship("Case", back_populates="sensor_reports")
+    field = relationship("Field", back_populates="sensor_reports")
+    readings = relationship("SensorReading", back_populates="sensor_report", cascade="all, delete-orphan")
+
+
+class SensorReading(Base):
+    __tablename__ = "sensor_readings"
+    __table_args__ = (
+        Index("ix_sensor_readings_case_id_measured_at", "case_id", "measured_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    sensor_report_id = Column(Integer, ForeignKey("sensor_reports.id", ondelete="CASCADE"), nullable=True)
+    case_id = Column(Integer, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    measured_at = Column(DateTime, nullable=False)
+    soil_moisture_pct = Column(Float, nullable=True)
+    n_mgkg = Column(Float, nullable=True)
+    p_mgkg = Column(Float, nullable=True)
+    k_mgkg = Column(Float, nullable=True)
+    temp_c = Column(Float, nullable=True)
+    humidity_pct = Column(Float, nullable=True)
+    ph = Column(Float, nullable=True)
+    leaf_wetness_pct = Column(Float, nullable=True)
+
+    sensor_report = relationship("SensorReport", back_populates="readings")
+    case = relationship("Case", back_populates="sensor_readings")
 
 
 class Recommendation(Base):
@@ -210,8 +279,10 @@ class Recommendation(Base):
     uncertainty = Column(String(20), default="Medium")
     evidence = Column(Text, nullable=True)
     assumptions = Column(Text, nullable=True)
+    why = Column(Text, nullable=True)
     why_line = Column(Text, nullable=True)
     citation = Column(String(255), nullable=True)
+    chunk_ids = Column(JSON, default=list, nullable=True)
     rank = Column(Integer, default=1)
     is_visible_to_farmer = Column(Boolean, default=True)
     chemical_name = Column(String(100), nullable=True)
@@ -381,7 +452,9 @@ class PromptTemplate(Base):
     __tablename__ = "prompt_templates"
 
     id = Column(Integer, primary_key=True, index=True)
-    step = Column(String(50), unique=True, index=True, nullable=False)  # 'image_analysis', 'recommendation', 'safety_check', 'environmental'
+    step = Column(String(50), index=True, nullable=False)  # 'image_analysis', 'recommendation', 'safety_check', 'environmental'
+    version = Column(Integer, default=1, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
     title = Column(String(255), nullable=False)
     subtitle = Column(String(255), nullable=True)
     template = Column(Text, nullable=False)
@@ -403,3 +476,61 @@ class AuditLog(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 
     case = relationship("Case", back_populates="audit_logs")
+
+
+class LLMCall(Base):
+    __tablename__ = "llm_calls"
+
+    id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(Integer, ForeignKey("cases.id", ondelete="SET NULL"), nullable=True, index=True)
+    step = Column(String(50), index=True, nullable=False)
+    prompt_version = Column(Integer, default=1, nullable=False)
+    model = Column(String(100), nullable=False)
+    tokens_in = Column(Integer, default=0, nullable=False)
+    tokens_out = Column(Integer, default=0, nullable=False)
+    latency_ms = Column(Integer, default=0, nullable=False)
+    output_json = Column(JSON, nullable=False)
+    cache_key = Column(String(64), unique=True, index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+
+class RAGDocument(Base):
+    __tablename__ = "rag_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(255), nullable=False)
+    source_type = Column(String(100), nullable=True)
+    year = Column(Integer, nullable=True)
+    authors = Column(String(255), nullable=True)
+    publisher = Column(String(255), nullable=True)
+    filename = Column(String(255), nullable=True)
+    file_path = Column(String(500), nullable=True)
+    chunk_count = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+
+class EvalCase(Base):
+    __tablename__ = "eval_cases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(Integer, ForeignKey("cases.id", ondelete="SET NULL"), nullable=True)
+    crop = Column(String(100), nullable=True)
+    ground_truth_category = Column(String(100), nullable=True)
+    ground_truth_label = Column(String(255), nullable=True)
+    description = Column(Text, nullable=True)
+    image_path = Column(String(500), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+
+class EvalRun(Base):
+    __tablename__ = "eval_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_name = Column(String(255), nullable=True)
+    model = Column(String(100), nullable=False)
+    prompt_version = Column(Integer, default=1, nullable=False)
+    total_cases = Column(Integer, default=0, nullable=False)
+    accuracy = Column(Float, default=0.0, nullable=False)
+    metrics = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)

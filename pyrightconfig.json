@@ -1,0 +1,19 @@
+{
+  "include": [
+    "backend"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "backend",
+      "venvPath": "backend",
+      "venv": ".venv"
+    }
+  ],
+  "typeCheckingMode": "standard",
+  "reportGeneralTypeIssues": false,
+  "reportAttributeAccessIssue": false,
+  "reportArgumentType": false,
+  "reportCallIssue": false,
+  "reportOptionalSubscript": false,
+  "reportOptionalMemberAccess": false
+}

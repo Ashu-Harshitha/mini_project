@@ -1,0 +1,147 @@
+# indicative demo values, edit with an agronomist
+# Sensor threshold ranges per crop for agronomic interpretation
+
+default:
+  moisture:
+    severe_low: 18.0
+    low: 22.0
+    adequate_min: 22.0
+    adequate_max: 38.0
+    high: 38.0
+    severe_high: 42.0
+  nitrogen:
+    low: 35.0
+    adequate_min: 35.0
+    adequate_max: 110.0
+    high: 110.0
+  phosphorus:
+    low: 25.0
+    adequate_min: 25.0
+    adequate_max: 90.0
+    high: 90.0
+  potassium:
+    low: 55.0
+    adequate_min: 55.0
+    adequate_max: 120.0
+    high: 120.0
+  ph:
+    low: 5.5
+    adequate_min: 5.5
+    adequate_max: 7.5
+    high: 7.5
+
+corn:
+  moisture:
+    severe_low: 18.0
+    low: 22.0
+    adequate_min: 22.0
+    adequate_max: 38.0
+    high: 38.0
+    severe_high: 42.0
+  nitrogen:
+    low: 40.0
+    adequate_min: 40.0
+    adequate_max: 110.0
+    high: 110.0
+  phosphorus:
+    low: 30.0
+    adequate_min: 30.0
+    adequate_max: 90.0
+    high: 90.0
+  potassium:
+    low: 60.0
+    adequate_min: 60.0
+    adequate_max: 120.0
+    high: 120.0
+  ph:
+    low: 5.8
+    adequate_min: 5.8
+    adequate_max: 7.0
+    high: 7.0
+
+soybean:
+  moisture:
+    severe_low: 18.0
+    low: 22.0
+    adequate_min: 22.0
+    adequate_max: 38.0
+    high: 38.0
+    severe_high: 42.0
+  nitrogen:
+    low: 30.0
+    adequate_min: 30.0
+    adequate_max: 110.0
+    high: 110.0
+  phosphorus:
+    low: 25.0
+    adequate_min: 25.0
+    adequate_max: 90.0
+    high: 90.0
+  potassium:
+    low: 55.0
+    adequate_min: 55.0
+    adequate_max: 120.0
+    high: 120.0
+  ph:
+    low: 5.5
+    adequate_min: 5.5
+    adequate_max: 7.5
+    high: 7.5
+
+rice:
+  moisture:
+    severe_low: 25.0
+    low: 35.0
+    adequate_min: 35.0
+    adequate_max: 45.0
+    high: 45.0
+    severe_high: 55.0
+  nitrogen:
+    low: 35.0
+    adequate_min: 35.0
+    adequate_max: 110.0
+    high: 110.0
+  phosphorus:
+    low: 25.0
+    adequate_min: 25.0
+    adequate_max: 90.0
+    high: 90.0
+  potassium:
+    low: 55.0
+    adequate_min: 55.0
+    adequate_max: 120.0
+    high: 120.0
+  ph:
+    low: 5.5
+    adequate_min: 5.5
+    adequate_max: 7.0
+    high: 7.0
+
+wheat:
+  moisture:
+    severe_low: 18.0
+    low: 22.0
+    adequate_min: 22.0
+    adequate_max: 38.0
+    high: 38.0
+    severe_high: 42.0
+  nitrogen:
+    low: 35.0
+    adequate_min: 35.0
+    adequate_max: 110.0
+    high: 110.0
+  phosphorus:
+    low: 25.0
+    adequate_min: 25.0
+    adequate_max: 90.0
+    high: 90.0
+  potassium:
+    low: 55.0
+    adequate_min: 55.0
+    adequate_max: 120.0
+    high: 120.0
+  ph:
+    low: 5.5
+    adequate_min: 5.5
+    adequate_max: 7.5
+    high: 7.5

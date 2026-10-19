@@ -1,4 +1,9 @@
-from app.core.confidence import calculate_confidence, get_uncertainty_band, evaluate_confidence
+from app.core.confidence import (
+    calculate_confidence,
+    get_uncertainty_band,
+    evaluate_confidence,
+    calculate_data_completeness,
+)
 
 
 def test_confidence_formula_exact_weights():
@@ -43,3 +48,20 @@ def test_evaluate_confidence_tuple():
     # 0.4*85 + 0.3*80 + 0.3*80 = 34 + 24 + 24 = 82.0
     assert score == 82.0
     assert band == "Low"
+
+
+def test_data_completeness_weights():
+    # Full inputs: image 0.30, sensor report 0.30, description 0.20, weather 0.20 = 100.0%
+    assert calculate_data_completeness(True, True, True, True) == 100.0
+
+    # None available = 0.0%
+    assert calculate_data_completeness(False, False, False, False) == 0.0
+
+    # Only image and sensor report: 30 + 30 = 60.0%
+    assert calculate_data_completeness(has_image=True, has_sensor_report=True) == 60.0
+
+    # Only description and weather: 20 + 20 = 40.0%
+    assert calculate_data_completeness(has_description=True, has_weather=True) == 40.0
+
+    # Image, description, weather: 30 + 20 + 20 = 70.0%
+    assert calculate_data_completeness(has_image=True, has_description=True, has_weather=True) == 70.0

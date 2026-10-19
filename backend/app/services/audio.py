@@ -2,7 +2,6 @@ import os
 import shutil
 import logging
 import subprocess
-from typing import Optional
 from fastapi import HTTPException, UploadFile, status
 from app.core.config import settings
 

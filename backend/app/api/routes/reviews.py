@@ -1,10 +1,11 @@
-from typing import List, Union, Optional
+import datetime
+from typing import List, Union
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.core.database import get_db
-from app.models.models import Case, Review, User, Recommendation, Message, Assignment
+from app.models.models import Case, Review, User, Recommendation, Message
 from app.schemas.schemas import CaseRead, ReviewDecisionIn, ReviewRead
 from app.api.deps import get_current_user, require_role
 from app.services.case_state import CaseStateMachine, CaseState
@@ -36,7 +37,9 @@ def get_review_queue(
     """
     query = db.query(Case).filter(Case.status == CaseState.PENDING_REVIEW)
     if current_user.role == "agronomist":
-        query = query.filter(Case.assigned_agronomist_id == current_user.id)
+        query = query.filter(
+            (Case.assigned_agronomist_id == current_user.id) | (Case.assigned_agronomist_id.is_(None))
+        )
 
     # Sort high-risk (uncertainty == 'High') first, then oldest assigned_at / created_at first
     cases = query.all()
@@ -57,7 +60,7 @@ def submit_review(
     reject requires note of >= 10 chars.
     approve_with_edits requires edits.
     """
-    # 1. Role validation: assigned agronomist only; admins explicitly get 403
+    # 1. Role validation: agronomists only; admins explicitly get 403
     if current_user.role == "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -71,12 +74,15 @@ def submit_review(
 
     case = get_case_or_404(db, id)
 
-    # 2. Assignment check: must be assigned to current_user
-    if case.assigned_agronomist_id != current_user.id:
+    # 2. Assignment check: if assigned to another agronomist -> 403; if unassigned -> claim it
+    if case.assigned_agronomist_id and case.assigned_agronomist_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Forbidden: this case is not assigned to you.",
         )
+    if not case.assigned_agronomist_id:
+        case.assigned_agronomist_id = current_user.id
+        case.assigned_at = datetime.datetime.now(datetime.timezone.utc)
 
     decision = (review_in.decision or review_in.status or "").lower().strip()
     if not decision or decision not in ("approve", "approved", "approve_with_edits", "approved_with_edits", "reject", "rejected"):
@@ -122,7 +128,7 @@ def submit_review(
 
     if review_in.note:
         case.decision_note = review_in.note
-        if not case.final_suggestion and not is_reject:
+        if not case.final_suggestion:
             case.final_suggestion = review_in.note
 
     # 5. State machine transition: approved cases go APPROVED then DELIVERED; rejected go REJECTED
@@ -157,14 +163,18 @@ def submit_review(
             if r.is_visible_to_farmer
         ]
 
-    gemini = get_gemini_client()
-    summary = gemini.generate_farmer_summary(
-        crop=case.crop,
-        approved_actions=approved_actions,
-        final_suggestion=case.final_suggestion or review_in.note,
-        lang=farmer_lang,
-    )
-    case.farmer_summary = summary
+    suggestion_text = case.final_suggestion or review_in.note
+    if is_reject:
+        case.farmer_summary = f"Agronomist Review ({case.crop}): Automated advice rejected. Agronomist suggestion: {suggestion_text}"
+    else:
+        gemini = get_gemini_client()
+        summary = gemini.generate_farmer_summary(
+            crop=case.crop,
+            approved_actions=approved_actions,
+            final_suggestion=suggestion_text,
+            lang=farmer_lang,
+        )
+        case.farmer_summary = summary
 
     # 7. Create messages row kind=decision
     note_text = review_in.note or f"Review decision: {case.status}"

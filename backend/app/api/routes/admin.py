@@ -2,8 +2,8 @@ import csv
 import io
 import datetime
 import logging
-from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -29,6 +29,7 @@ from app.schemas.schemas import (
     AdminCommunicationRead,
     AdminFeedbackRead,
     CaseRead,
+    AdminCaseRead,
 )
 from app.api.deps import require_role
 from app.api.routes.auth import validate_username, validate_password
@@ -164,6 +165,41 @@ def list_agronomists_metrics(db: Session = Depends(get_db)):
         )
         avg_rating = round(float(avg_rating_val), 1) if avg_rating_val is not None else 5.0
 
+        accepted_count = (
+            db.query(func.count(Review.id))
+            .filter(
+                Review.reviewer_id == agro.id,
+                Review.status.in_(("APPROVED", "DELIVERED", "approve", "approved")),
+            )
+            .scalar() or 0
+        )
+        accepted_with_edits_count = (
+            db.query(func.count(Review.id))
+            .filter(
+                Review.reviewer_id == agro.id,
+                Review.status.in_(("APPROVED_WITH_EDITS", "approve_with_edits", "approved_with_edits")),
+            )
+            .scalar() or 0
+        )
+        rejected_count = (
+            db.query(func.count(Review.id))
+            .filter(
+                Review.reviewer_id == agro.id,
+                Review.status.in_(("REJECTED", "reject", "rejected")),
+            )
+            .scalar() or 0
+        )
+        positive_reviews_count = (
+            db.query(func.count(OutcomeFeedback.id))
+            .filter(OutcomeFeedback.agronomist_id == agro.id, OutcomeFeedback.rating >= 4)
+            .scalar() or 0
+        )
+        negative_reviews_count = (
+            db.query(func.count(OutcomeFeedback.id))
+            .filter(OutcomeFeedback.agronomist_id == agro.id, OutcomeFeedback.rating <= 2)
+            .scalar() or 0
+        )
+
         results.append(
             AdminAgronomistRead(
                 id=agro.id,
@@ -174,6 +210,11 @@ def list_agronomists_metrics(db: Session = Depends(get_db)):
                 max_open_cases=agro.max_open_cases or settings.DEFAULT_MAX_OPEN_CASES,
                 total_reviewed=total_reviewed,
                 avg_feedback_rating=avg_rating,
+                accepted_count=accepted_count,
+                accepted_with_edits_count=accepted_with_edits_count,
+                rejected_count=rejected_count,
+                positive_reviews_count=positive_reviews_count,
+                negative_reviews_count=negative_reviews_count,
             )
         )
     return results
@@ -208,6 +249,12 @@ def update_agronomist_config(
     avg_rating_val = db.query(func.avg(OutcomeFeedback.rating)).filter(OutcomeFeedback.agronomist_id == agro.id).scalar()
     avg_rating = round(float(avg_rating_val), 1) if avg_rating_val is not None else 5.0
 
+    accepted_count = db.query(func.count(Review.id)).filter(Review.reviewer_id == agro.id, Review.status.in_(("APPROVED", "DELIVERED"))).scalar() or 0
+    accepted_with_edits_count = db.query(func.count(Review.id)).filter(Review.reviewer_id == agro.id, Review.status.in_(("APPROVED_WITH_EDITS",))).scalar() or 0
+    rejected_count = db.query(func.count(Review.id)).filter(Review.reviewer_id == agro.id, Review.status.in_(("REJECTED",))).scalar() or 0
+    positive_reviews_count = db.query(func.count(OutcomeFeedback.id)).filter(OutcomeFeedback.agronomist_id == agro.id, OutcomeFeedback.rating >= 4).scalar() or 0
+    negative_reviews_count = db.query(func.count(OutcomeFeedback.id)).filter(OutcomeFeedback.agronomist_id == agro.id, OutcomeFeedback.rating <= 2).scalar() or 0
+
     return AdminAgronomistRead(
         id=agro.id,
         name=agro.full_name or agro.username,
@@ -217,10 +264,15 @@ def update_agronomist_config(
         max_open_cases=agro.max_open_cases,
         total_reviewed=total_reviewed,
         avg_feedback_rating=avg_rating,
+        accepted_count=accepted_count,
+        accepted_with_edits_count=accepted_with_edits_count,
+        rejected_count=rejected_count,
+        positive_reviews_count=positive_reviews_count,
+        negative_reviews_count=negative_reviews_count,
     )
 
 
-@router.get("/cases", response_model=List[CaseRead])
+@router.get("/cases", response_model=List[AdminCaseRead])
 def admin_list_cases(
     status: Optional[str] = None,
     agronomist_id: Optional[int] = None,
@@ -229,7 +281,7 @@ def admin_list_cases(
     db: Session = Depends(get_db),
 ):
     """
-    List all cases with admin filtering options.
+    List all cases with admin filtering options, including handling agronomist details, suggestions, and feedback.
     """
     query = db.query(Case)
     if status and status != "All":
@@ -241,7 +293,34 @@ def admin_list_cases(
     if farmer_id:
         query = query.filter(Case.user_id == farmer_id)
 
-    return query.order_by(Case.created_at.desc()).all()
+    cases = query.order_by(Case.created_at.desc()).all()
+    results = []
+    for c in cases:
+        farmer = db.query(User).filter(User.id == c.user_id).first()
+        agro = db.query(User).filter(User.id == c.assigned_agronomist_id).first() if c.assigned_agronomist_id else None
+        fb = db.query(OutcomeFeedback).filter(OutcomeFeedback.case_id == c.id).first()
+
+        results.append(
+            AdminCaseRead(
+                id=c.id,
+                case_number=c.case_number,
+                farmer_id=c.user_id,
+                farmer_name=farmer.full_name or farmer.username if farmer else f"Farmer #{c.user_id}",
+                status=c.status,
+                crop=c.crop,
+                description=c.description,
+                assigned_agronomist_id=c.assigned_agronomist_id,
+                assigned_agronomist_name=agro.full_name or agro.username if agro else None,
+                assigned_at=c.assigned_at,
+                decision_note=c.decision_note,
+                final_suggestion=c.final_suggestion,
+                farmer_feedback_rating=fb.rating if fb else None,
+                farmer_feedback_comment=fb.comment if fb else None,
+                reassign_count=c.reassign_count or 0,
+                created_at=c.created_at,
+            )
+        )
+    return results
 
 
 @router.post("/cases/{case_id}/assign")

@@ -47,6 +47,36 @@ def get_uncertainty_band(confidence: float) -> str:
         return "High"
 
 
+def calculate_data_completeness(
+    has_image: bool = False,
+    has_sensor_report: bool = False,
+    has_description: bool = False,
+    has_weather: bool = False,
+    has_sensor: bool = None,
+) -> float:
+    """
+    Computes data completeness score as a weighted share of available inputs:
+    - image: 0.30
+    - sensor report: 0.30
+    - description: 0.20
+    - weather: 0.20
+    Returns score as a percentage [0.0, 100.0] rounded to 1 decimal place.
+    """
+    if has_sensor is not None:
+        has_sensor_report = has_sensor
+
+    score = 0.0
+    if has_image:
+        score += 0.30
+    if has_sensor_report:
+        score += 0.30
+    if has_description:
+        score += 0.20
+    if has_weather:
+        score += 0.20
+    return round(score * 100.0, 1)
+
+
 def evaluate_confidence(
     model_confidence: float,
     retrieval_confidence: float,

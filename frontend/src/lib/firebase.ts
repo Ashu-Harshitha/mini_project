@@ -64,10 +64,10 @@ export type { User, Auth };
  * Retrieves the Firebase ID token for API requests.
  * Auth ALWAYS uses real Firebase ID tokens even when mocks are enabled for other endpoints.
  */
-export async function getIdToken(): Promise<string | null> {
+export async function getIdToken(forceRefresh = false): Promise<string | null> {
   if (auth && auth.currentUser) {
     try {
-      return await auth.currentUser.getIdToken();
+      return await auth.currentUser.getIdToken(forceRefresh);
     } catch (err) {
       console.warn('Could not retrieve Firebase ID token:', err);
     }

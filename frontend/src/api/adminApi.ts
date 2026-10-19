@@ -23,7 +23,13 @@ export interface AdminAgronomist {
   open_count: number;
   max_open_cases: number;
   total_reviewed: number;
-  avg_rating: number;
+  avg_feedback_rating?: number;
+  avg_rating?: number;
+  accepted_count?: number;
+  accepted_with_edits_count?: number;
+  rejected_count?: number;
+  positive_reviews_count?: number;
+  negative_reviews_count?: number;
 }
 
 export interface CreateAgronomistPayload {
@@ -45,6 +51,10 @@ export interface AdminCaseItem {
   assigned_agronomist_id?: number | null;
   assigned_agronomist_name?: string | null;
   assigned_at?: string | null;
+  decision_note?: string | null;
+  final_suggestion?: string | null;
+  farmer_feedback_rating?: number | null;
+  farmer_feedback_comment?: string | null;
   created_at: string;
   reassign_count: number;
   history?: Array<{

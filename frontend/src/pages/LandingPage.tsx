@@ -28,14 +28,14 @@ import {
 import { authApi } from '@/api/authApi';
 
 const AUTH_DOMAIN = import.meta.env.VITE_AUTH_EMAIL_DOMAIN || 'agriadvisor.app';
-const SHOW_DEMO_LOGINS = import.meta.env.VITE_SHOW_DEMO_LOGINS === 'true';
+const SHOW_DEMO_LOGINS = import.meta.env.VITE_SHOW_DEMO_LOGINS !== 'false';
 
 const signInSchema = z.object({
   username: z
     .string()
-    .min(3, 'Username must be at least 3 characters')
-    .max(20, 'Username must be at most 20 characters')
-    .regex(/^[a-zA-Z0-9_.]+$/, 'Letters, digits, underscores, or periods only'),
+    .min(3, 'Username or email must be at least 3 characters')
+    .max(50, 'Username or email must be at most 50 characters')
+    .regex(/^[a-zA-Z0-9_.@+-]+$/, 'Letters, digits, underscores, periods, or email'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
 });
 
@@ -128,9 +128,16 @@ export const LandingPage: React.FC = () => {
       code === 'auth/invalid-credential' ||
       code === 'auth/user-not-found' ||
       code === 'auth/wrong-password' ||
+      code === 'auth/invalid-email' ||
+      message.includes('400') ||
+      message.includes('INVALID_LOGIN_CREDENTIALS') ||
+      message.includes('EMAIL_NOT_FOUND') ||
       message.includes('401')
     ) {
-      return t('auth.invalidCredentials', 'Invalid username or password');
+      return t(
+        'auth.invalidCredentials',
+        'Invalid username or password. Please use farmer / 123456 or click a quick-fill demo button below.'
+      );
     }
     if (code === 'auth/too-many-requests') {
       return t('auth.tooManyAttempts', 'Too many attempts, try again later');
@@ -199,7 +206,8 @@ export const LandingPage: React.FC = () => {
     }
 
     try {
-      const email = `${data.username.trim().toLowerCase()}@${AUTH_DOMAIN}`;
+      const trimmed = data.username.trim().toLowerCase();
+      const email = trimmed.includes('@') ? trimmed : `${trimmed}@${AUTH_DOMAIN}`;
       await signInWithEmailAndPassword(auth, email, data.password);
       await handleAfterLoginSuccess();
     } catch (err: any) {
@@ -690,7 +698,7 @@ export const LandingPage: React.FC = () => {
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center mb-2">
                   Demo Fast Credentials
                 </p>
-                <div className="grid grid-cols-3 gap-1.5">
+                <div className="grid grid-cols-4 gap-1.5">
                   <button
                     type="button"
                     onClick={() => handleFillDemo('farmer')}
@@ -711,6 +719,13 @@ export const LandingPage: React.FC = () => {
                     className="px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-[11px] font-medium text-slate-700 dark:text-slate-300 text-center transition"
                   >
                     Admin
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleFillDemo('ashu')}
+                    className="px-2 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 text-center transition"
+                  >
+                    Ashu
                   </button>
                 </div>
               </div>
