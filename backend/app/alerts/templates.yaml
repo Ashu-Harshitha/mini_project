@@ -1,0 +1,133 @@
+# Alert templates for weather and sensor alerts.
+# Supported languages: en (English), hi (Hindi), kn (Kannada).
+# Each template contains:
+#   title: Short alert title
+#   message: Exactly one concise sentence explaining the situation
+#   action: Exactly one direct, simple action instruction for the farmer
+
+rules:
+  heavy_rain:
+    en:
+      title: "Heavy Rain Alert"
+      message: "Heavy rainfall of {mm} mm is expected on {date}."
+      action: "Avoid fertilizer application and spraying."
+    hi:
+      title: "भारी बारिश की चेतावनी"
+      message: "{date} को {mm} मिमी भारी बारिश होने की संभावना है।"
+      action: "खाद डालने और कीटनाशक छिड़काव से बचें।"
+    kn:
+      title: "ಭಾರಿ ಮಳೆಯ ಎಚ್ಚರಿಕೆ"
+      message: "{date} ರಂದು {mm} ಮಿ.ಮೀ ಭಾರಿ ಮಳೆಯಾಗುವ ಸಾಧ್ಯತೆಯಿದೆ."
+      action: "ರಸಗೊಬ್ಬರ ಮತ್ತು ಕೀಟನಾಶಕ ಸಿಂಪಡಿಸುವುದನ್ನು ತಪ್ಪಿಸಿ."
+
+  heat_stress:
+    en:
+      title: "Heat Stress Alert"
+      message: "Maximum temperature is forecast to reach {temp}°C on {date}."
+      action: "Irrigate in early morning to protect crop roots."
+    hi:
+      title: "अत्यधिक गर्मी की चेतावनी"
+      message: "{date} को अधिकतम तापमान {temp}°C तक पहुंचने की संभावना है।"
+      action: "फसल को बचाने के लिए सुबह जल्दी सिंचाई करें।"
+    kn:
+      title: "ತೀವ್ರ ತಾಪಮಾನದ ಎಚ್ಚರಿಕೆ"
+      message: "{date} ರಂದು ಗರಿಷ್ಠ ತಾಪಮಾನ {temp}°C ತಲುಪುವ ಸಾಧ್ಯತೆಯಿದೆ."
+      action: "ಬೆಳೆಯನ್ನು ರಕ್ಷಿಸಲು ಮುಂಜಾನೆ ನೀರುಣಿಸಿ."
+
+  frost_risk:
+    en:
+      title: "Frost Risk Alert"
+      message: "Minimum temperature is forecast to drop to {temp}°C on {date}."
+      action: "Cover young crops or apply protective irrigation."
+    hi:
+      title: "पाले का जोखिम"
+      message: "{date} को तापमान गिरकर {temp}°C तक आने से पाला पड़ सकता है।"
+      action: "फसलों को ढकें या सुरक्षात्मक हल्की सिंचाई करें।"
+    kn:
+      title: "ಹಿಮ ಬೀಳುವ ಅಪಾಯ"
+      message: "{date} ರಂದು ತಾಪಮಾನ {temp}°C ಗೆ ಇಳಿಯುವ ಸಾಧ್ಯತೆಯಿದೆ."
+      action: "ಬೆಳೆಗಳಿಗೆ ಹೊದಿಕೆ ಹಾಕಿ ಅಥವಾ ಲಘು ನೀರಾವರಿ ಮಾಡಿ."
+
+  strong_wind:
+    en:
+      title: "Strong Wind Alert"
+      message: "Maximum wind speed is forecast to reach {speed} km/h on {date}."
+      action: "Postpone spraying to avoid chemical drift."
+    hi:
+      title: "तेज हवा की चेतावनी"
+      message: "{date} को हवा की गति {speed} किमी/घंटा तक पहुंचने का अनुमान है।"
+      action: "दवा को बहने से रोकने के लिए छिड़काव टालें।"
+    kn:
+      title: "ಬಿರುಗಾಳಿಯ ಎಚ್ಚರಿಕೆ"
+      message: "{date} ರಂದು ಗಾಳಿಯ ವೇಗ {speed} ಕಿ.ಮೀ/ಗಂಟೆ ತಲುಪಬಹುದು."
+      action: "ಕೀಟನಾಶಕ ಸಿಂಪಡಿಸುವುದನ್ನು ಮುಂದೂಡಿ."
+
+  dry_spell:
+    en:
+      title: "Dry Spell Alert"
+      message: "Only {mm} mm of rain is forecast over the next 7 days."
+      action: "Check soil moisture and schedule irrigation."
+    hi:
+      title: "शुष्क मौसम का अलर्ट"
+      message: "अगले 7 दिनों में केवल {mm} मिमी वर्षा का अनुमान है।"
+      action: "मिट्टी की नमी जांचें और सिंचाई की योजना बनाएं।"
+    kn:
+      title: "ಮಳೆ ಕೊರತೆ ಎಚ್ಚರಿಕೆ"
+      message: "ಮುಂದಿನ 7 ದಿನಗಳಲ್ಲಿ ಕೇವಲ {mm} ಮಿ.ಮೀ ಮಳೆಯಾಗುವ ಸಾಧ್ಯತೆಯಿದೆ."
+      action: "ಮಣ್ಣಿನ ತೇವಾಂಶ ಪರೀಕ್ಷಿಸಿ ನೀರಾವರಿ ಒದಗಿಸಿ."
+
+  disease_pressure:
+    en:
+      title: "Disease Pressure Alert"
+      message: "Wet and warm conditions over {days} days increase fungal disease risk."
+      action: "Scout fields closely for fungal leaf lesions."
+    hi:
+      title: "कवक रोग का जोखिम"
+      message: "लगातार {days} दिनों तक बारिश और अनुकूल तापमान से फंगस फैलने की आशंका है।"
+      action: "खेत का निरीक्षण करें और पत्तों पर धब्बों की जांच करें।"
+    kn:
+      title: "ಶಿಲೀಂಧ್ರ ರೋಗದ ಅಪಾಯ"
+      message: "ಮುಂದಿನ {days} ದಿನಗಳ ಮಳೆ ಮತ್ತು ತೇವಾಂಶದಿಂದ ಶಿಲೀಂಧ್ರ ರೋಗ ಹರಡುವ ಸಾಧ್ಯತೆಯಿದೆ."
+      action: "ಎಲೆಗಳಲ್ಲಿ ರೋಗದ ಲಕ್ಷಣಗಳಿವೆಯೇ ಎಂದು ಬೆಳೆ ಪರಿಶೀಲಿಸಿ."
+
+  sensor_dry_soil:
+    en:
+      title: "Dry Soil Alert"
+      message: "Field sensor shows soil moisture has dropped to {moisture}% on {date}."
+      action: "Irrigate the field promptly to prevent moisture stress."
+    hi:
+      title: "मिट्टी में नमी की कमी"
+      message: "{date} को सेंसर के अनुसार मिट्टी की नमी घटकर {moisture}% रह गई है।"
+      action: "फसल को बचाने के लिए तुरंत सिंचाई करें।"
+    kn:
+      title: "ಮಣ್ಣಿನ ತೇವಾಂಶದ ಕೊರತೆ"
+      message: "{date} ರಂದು ಸೆನ್ಸರ್ ಪ್ರಕಾರ ಮಣ್ಣಿನ ತೇವಾಂಶ {moisture}% ಗೆ ಇಳಿದಿದೆ."
+      action: "ಬೆಳೆಗೆ ತಕ್ಷಣವೇ ನೀರುಣಿಸಿ."
+
+  sensor_fungal_pressure:
+    en:
+      title: "Sensor Fungal Pressure Alert"
+      message: "Prolonged leaf wetness and high humidity detected on {date}."
+      action: "Scout for fungal disease and consider protective fungicide."
+    hi:
+      title: "सेंसर: फफूंद रोग का खतरा"
+      message: "{date} को पत्तियों पर लगातार गीलापन और उच्च आर्द्रता दर्ज की गई है।"
+      action: "फफूंदनाशक का छिड़काव करने और संक्रमित पत्तियां हटाने पर विचार करें।"
+    kn:
+      title: "ಸೆನ್ಸರ್: ಶಿಲೀಂಧ್ರ ರೋಗದ ಎಚ್ಚರಿಕೆ"
+      message: "{date} ರಂದು ಎಲೆಗಳಲ್ಲಿ ತೇವಾಂಶ ಮತ್ತು ಆರ್ದ್ರತೆ ನಿರಂತರವಾಗಿ ಹೆಚ್ಚಾಗಿದೆ."
+      action: "ಶಿಲೀಂಧ್ರನಾಶಕ ಸಿಂಪಡಣೆ ಮತ್ತು ಬೆಳೆ ರಕ್ಷಣೆಯನ್ನು ಪರಿಶೀಲಿಸಿ."
+
+  sensor_heat_stress:
+    en:
+      title: "Sensor Heat Stress Alert"
+      message: "Field sensor recorded stress temperature of {temp}°C on {date}."
+      action: "Apply light irrigation to cool crop canopy."
+    hi:
+      title: "सेंसर: फसल में गर्मी का तनाव"
+      message: "{date} को खेत के सेंसर ने अत्यधिक तापमान {temp}°C दर्ज किया है।"
+      action: "फसल को ठंडक देने के लिए तुरंत सिंचाई करें।"
+    kn:
+      title: "ಸೆನ್ಸರ್: ಶಾಖದ ಒತ್ತಡ"
+      message: "{date} ರಂದು ಹೊಲದ ಸೆನ್ಸರ್‌ನಲ್ಲಿ {temp}°C ತಾಪಮಾನ ದಾಖಲಾಗಿದೆ."
+      action: "ಬೆಳೆ ತಂಪಾಗಿಸಲು ಲಘು ನೀರಾವರಿ ಮಾಡಿ."

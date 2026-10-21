@@ -1,0 +1,4 @@
+Subject: Follow-up: How is your field doing? (Case {case_number})
+
+It has been a few days since your guidance report for Case {case_number} was delivered. Please let us know if your crop has improved.
+Report your outcome: {case_url}

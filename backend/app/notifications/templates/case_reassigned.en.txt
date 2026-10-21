@@ -1,0 +1,4 @@
+Subject: Case {case_number} Reassigned
+
+Case {case_number} has been reassigned to {agronomist_name}.
+View case details: {case_url}

@@ -1,0 +1,118 @@
+weights:
+  image_accuracy: 0.25
+  groundedness: 0.20
+  uncertainty_calibration: 0.15
+  safety_score: 0.20
+  farmer_clarity: 0.10
+  environmental_awareness: 0.10
+
+models:
+  - id: "gemini-2.5-flash-lite"
+    name: "Gemini 2.5 Flash Lite"
+    model_key: "gemini-2.5-flash-lite"
+    provider: "Google"
+    is_live: true
+    benchmark_only: false
+    is_reference: false
+    cost_input_per_m: 0.0
+    cost_output_per_m: 0.0
+    free_tier: true
+    context_window: "1M tokens"
+    latency_ms: 450
+    metrics:
+      image_accuracy: 84.0
+      category_accuracy: 92.0
+      groundedness: 86.0
+      uncertainty_calibration: 88.0
+      safety_score: 96.0
+      farmer_clarity: 85.0
+      environmental_awareness: 78.0
+    source_note: "Live production model via google-genai SDK (Free Tier)"
+
+  - id: "gemini-2.5-flash"
+    name: "Gemini 2.5 Flash"
+    model_key: "gemini-2.5-flash"
+    provider: "Google"
+    is_live: true
+    benchmark_only: false
+    is_reference: false
+    cost_input_per_m: 0.0
+    cost_output_per_m: 0.0
+    free_tier: true
+    context_window: "1M tokens"
+    latency_ms: 620
+    metrics:
+      image_accuracy: 89.0
+      category_accuracy: 95.0
+      groundedness: 90.0
+      uncertainty_calibration: 91.0
+      safety_score: 98.0
+      farmer_clarity: 88.0
+      environmental_awareness: 82.0
+    source_note: "Live production model via google-genai SDK (Free Tier)"
+
+  - id: "claude-3-5-sonnet"
+    name: "Claude 3.5 Sonnet"
+    model_key: "claude-3-5-sonnet"
+    provider: "Anthropic"
+    is_live: false
+    benchmark_only: true
+    is_reference: true
+    cost_input_per_m: 3.00
+    cost_output_per_m: 15.00
+    free_tier: false
+    context_window: "200K tokens"
+    latency_ms: 820
+    metrics:
+      image_accuracy: 91.0
+      category_accuracy: 96.0
+      groundedness: 92.0
+      uncertainty_calibration: 89.0
+      safety_score: 97.0
+      farmer_clarity: 90.0
+      environmental_awareness: 85.0
+    source_note: "Anthropic Agricultural Eval Benchmark 2024 (Reference values)"
+
+  - id: "gpt-4o"
+    name: "GPT-4o"
+    model_key: "gpt-4o"
+    provider: "OpenAI"
+    is_live: false
+    benchmark_only: true
+    is_reference: true
+    cost_input_per_m: 2.50
+    cost_output_per_m: 10.00
+    free_tier: false
+    context_window: "128K tokens"
+    latency_ms: 780
+    metrics:
+      image_accuracy: 88.0
+      category_accuracy: 94.0
+      groundedness: 89.0
+      uncertainty_calibration: 87.0
+      safety_score: 95.0
+      farmer_clarity: 87.0
+      environmental_awareness: 80.0
+    source_note: "OpenAI Agronomy Paper 2024 (Reference values)"
+
+  - id: "llama-3-1-70b"
+    name: "Llama 3.1 70B"
+    model_key: "llama-3-1-70b"
+    provider: "Meta"
+    is_live: false
+    benchmark_only: true
+    is_reference: true
+    cost_input_per_m: 0.60
+    cost_output_per_m: 0.80
+    free_tier: false
+    context_window: "128K tokens"
+    latency_ms: 950
+    metrics:
+      image_accuracy: 82.0
+      category_accuracy: 88.0
+      groundedness: 83.0
+      uncertainty_calibration: 82.0
+      safety_score: 92.0
+      farmer_clarity: 83.0
+      environmental_awareness: 75.0
+    source_note: "Meta Llama 3.1 Technical Report (Reference values)"

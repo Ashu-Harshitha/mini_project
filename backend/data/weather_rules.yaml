@@ -1,0 +1,57 @@
+# AgriAdvisor Weather & Sensor Alert Rules
+# Every threshold is editable with agronomic rationale.
+
+forecast_rules:
+  # Heavy Rain: Daily precipitation >= threshold
+  # Avoid fertilizer application and pesticide spraying to prevent nutrient leaching, runoff, and chemical wash-off.
+  heavy_rain:
+    threshold_mm: 25.0
+    severity: warning
+
+  # Heat Stress: Daily maximum temperature >= threshold
+  # High temperatures accelerate evapotranspiration and flower abortion; irrigate early morning to cool root zones.
+  heat_stress:
+    threshold_tmax_c: 35.0
+    severity: high
+
+  # Frost Risk: Daily minimum temperature <= threshold
+  # Freezing temperatures cause cellular ice formation and tissue necrosis; protect young crops and sensitive blooms.
+  frost_risk:
+    threshold_tmin_c: 2.0
+    severity: high
+
+  # Strong Wind: Maximum wind speed >= threshold
+  # High winds cause spray drift to neighboring plots and reduce chemical application coverage; postpone spraying.
+  strong_wind:
+    threshold_kmh: 30.0
+    severity: warning
+
+  # Dry Spell: 7-day cumulative precipitation < threshold
+  # Extended dry spells deplete root zone moisture; check irrigation system and adjust scheduling.
+  dry_spell:
+    threshold_7d_rain_mm: 5.0
+    severity: warning
+
+  # Disease Pressure: >= min_days within 7-day forecast with daily rain >= min_daily_rain_mm and tmax between temp_range_min_c and temp_range_max_c
+  # Prolonged leaf moisture under moderate temperatures creates ideal conditions for fungal pathogens; scout fields for foliar lesions.
+  disease_pressure:
+    min_days: 3
+    min_daily_rain_mm: 1.0
+    temp_range_min_c: 20.0
+    temp_range_max_c: 30.0
+    severity: warning
+
+sensor_rules:
+  # Sensor Dry Soil: Triggered when field soil moisture drops below crop minimum threshold
+  sensor_dry_soil:
+    watch_severity: warning
+    high_severity: high
+
+  # Sensor Fungal Pressure: Triggered by sustained leaf wetness and high relative humidity
+  sensor_fungal_pressure:
+    watch_severity: warning
+    high_severity: high
+
+  # Sensor Heat Stress: Triggered when field sensor temperature reaches critical stress levels
+  sensor_heat_stress:
+    high_severity: high

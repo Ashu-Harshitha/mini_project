@@ -19,8 +19,13 @@ from app.api.routes import (
     eval,
     dashboard,
     rag,
+    models,
+    guardrails,
+    alerts,
+    outbreaks,
 )
 from app.scripts.seed import seed_database
+
 from app.services.assignment import check_case_assignment_timeouts
 
 logging.basicConfig(level=logging.INFO)
@@ -53,7 +58,19 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
-    # Timeout Job: APScheduler every 5 minutes
+    # Re-scan DB for cases whose feedback reminder is due so restarts never lose them
+    startup_db = SessionLocal()
+    try:
+        from app.services.feedback_reminders import check_and_send_feedback_reminders
+        reminders_sent = check_and_send_feedback_reminders(startup_db)
+        if reminders_sent > 0:
+            logger.info(f"Startup rescan dispatched {reminders_sent} due feedback reminder(s).")
+    except Exception as e:
+        logger.warning(f"Startup feedback reminder scan note: {e}")
+    finally:
+        startup_db.close()
+
+    # APScheduler: assignment timeouts (5 min) & feedback reminders (5 min)
     scheduler = None
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
@@ -67,10 +84,52 @@ async def lifespan(app: FastAPI):
             finally:
                 job_db.close()
 
+        def reminder_job():
+            job_db = SessionLocal()
+            try:
+                check_and_send_feedback_reminders(job_db)
+            except Exception as e:
+                logger.error(f"Error executing feedback reminder job: {e}")
+            finally:
+                job_db.close()
+
+        def weather_alerts_job():
+            import asyncio
+            from app.services.alerts_engine import run_all_weather_alerts_job
+            job_db = SessionLocal()
+            try:
+                loop = None
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                if loop.is_running():
+                    asyncio.create_task(run_all_weather_alerts_job(job_db))
+                else:
+                    loop.run_until_complete(run_all_weather_alerts_job(job_db))
+            except Exception as e:
+                logger.error(f"Error executing weather alerts job: {e}")
+            finally:
+                job_db.close()
+
+        def outbreak_detection_job():
+            job_db = SessionLocal()
+            try:
+                from app.services.outbreaks import detect_outbreaks
+                detect_outbreaks(job_db)
+            except Exception as e:
+                logger.error(f"Error executing outbreak detection job: {e}")
+            finally:
+                job_db.close()
+
         scheduler = BackgroundScheduler()
         scheduler.add_job(timeout_job, "interval", minutes=5)
+        scheduler.add_job(reminder_job, "interval", minutes=5)
+        scheduler.add_job(weather_alerts_job, "interval", hours=getattr(settings, "WEATHER_CHECK_HOURS", 6))
+        scheduler.add_job(outbreak_detection_job, "interval", hours=1)
         scheduler.start()
-        logger.info("Started APScheduler assignment timeout job (5-minute interval).")
+        logger.info("Started APScheduler jobs (timeouts, feedback reminders, weather alerts & outbreaks).")
     except Exception as e:
         logger.warning(f"Failed to start APScheduler: {e}")
 
@@ -93,10 +152,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS Middleware for Vite frontend
+# CORS Middleware limited strictly to FRONTEND_URL
+_cors_origins = [settings.FRONTEND_URL.rstrip("/")]
+if "localhost" in settings.FRONTEND_URL or "127.0.0.1" in settings.FRONTEND_URL:
+    _cors_origins.extend(["http://localhost:5173", "http://127.0.0.1:5173"])
+_cors_origins = list(dict.fromkeys(_cors_origins))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -124,17 +188,28 @@ app.include_router(auth.me_router)
 app.include_router(admin.router, prefix=api_prefix)
 app.include_router(admin.router)
 app.include_router(farms.router, prefix=api_prefix)
+app.include_router(guardrails.router, prefix=api_prefix)
+app.include_router(guardrails.router)
 app.include_router(cases.router, prefix=api_prefix)
 app.include_router(cases.router)
 app.include_router(reviews.router, prefix=api_prefix)
 app.include_router(reviews.router)
 app.include_router(prompts.router, prefix=api_prefix)
+app.include_router(prompts.router)
 app.include_router(notifications.router, prefix=api_prefix)
 app.include_router(eval.router, prefix=api_prefix)
+app.include_router(eval.router)
+app.include_router(models.router, prefix=api_prefix)
+app.include_router(models.router)
 app.include_router(dashboard.router, prefix=api_prefix)
 app.include_router(dashboard.router)
 app.include_router(rag.router, prefix=api_prefix)
 app.include_router(rag.router)
+app.include_router(alerts.router, prefix=api_prefix)
+app.include_router(alerts.router)
+app.include_router(outbreaks.router, prefix=api_prefix)
+app.include_router(outbreaks.router)
+
 
 
 @app.get("/health", tags=["Health"])

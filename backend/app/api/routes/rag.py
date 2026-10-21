@@ -36,7 +36,7 @@ from app.services.ai.factory import get_retriever
 
 logger = logging.getLogger("agriadvisor.rag.api")
 
-router = APIRouter(prefix="/rag", tags=["RAG"])
+router = APIRouter(prefix="/rag", tags=["RAG"], dependencies=[Depends(require_role("admin", "agronomist"))])
 
 # In-memory retrieval latency tracking for the last 50 queries
 _retrieval_latencies: deque = deque(maxlen=50)

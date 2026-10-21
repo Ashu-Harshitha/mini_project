@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>AgriAdvisor Expert Diagnostic Report - {{ case.case_number }}</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 12mm 15mm;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Noto Sans', Arial, sans-serif;
+      color: #0f172a;
+      line-height: 1.35;
+      font-size: 9.5pt;
+      background: #ffffff;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid #1e293b;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+    }
+    .logo-badge {
+      background: #1e293b;
+      color: #ffffff;
+      font-weight: 800;
+      font-size: 13pt;
+      padding: 4px 8px;
+      border-radius: 4px;
+      display: inline-block;
+    }
+    .header-title {
+      font-size: 13pt;
+      font-weight: 700;
+      color: #0f172a;
+      margin-top: 4px;
+    }
+    .header-meta {
+      text-align: right;
+      font-size: 8.5pt;
+      color: #475569;
+    }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-bottom: 12px;
+      font-size: 8.5pt;
+    }
+    .meta-cell strong {
+      display: block;
+      color: #64748b;
+      font-size: 7.5pt;
+      text-transform: uppercase;
+    }
+    .meta-cell span {
+      font-weight: 600;
+      color: #0f172a;
+    }
+    h2 {
+      font-size: 10.5pt;
+      font-weight: 700;
+      color: #0f172a;
+      border-bottom: 1px solid #cbd5e1;
+      padding-bottom: 3px;
+      margin-top: 10px;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 8px;
+      font-size: 8.5pt;
+    }
+    th, td {
+      border: 1px solid #cbd5e1;
+      padding: 4px 6px;
+      text-align: left;
+    }
+    th {
+      background: #f1f5f9;
+      font-weight: 700;
+      color: #334155;
+    }
+    .badge {
+      display: inline-block;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 7.5pt;
+      font-weight: 700;
+    }
+    .badge-passed { background: #dcfce7; color: #166534; }
+    .badge-flagged { background: #fef3c7; color: #92400e; }
+    .badge-blocked { background: #fee2e2; color: #991b1b; }
+    .rec-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 6px 8px;
+      margin-bottom: 6px;
+      background: #ffffff;
+    }
+    .rec-header {
+      display: flex;
+      justify-content: space-between;
+      font-weight: 700;
+      color: #0f172a;
+      font-size: 9pt;
+      margin-bottom: 2px;
+    }
+    .rec-meta {
+      font-size: 8pt;
+      color: #475569;
+      line-height: 1.3;
+    }
+    .rec-meta span {
+      margin-right: 8px;
+    }
+    .simulated-banner {
+      background: #eff6ff;
+      border: 1px dashed #3b82f6;
+      border-radius: 4px;
+      padding: 6px 8px;
+      font-size: 8pt;
+      color: #1e40af;
+      margin-bottom: 6px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <div class="logo-badge">AgriAdvisor Expert</div>
+      <div class="header-title">Comprehensive Agronomic Case Analysis</div>
+    </div>
+    <div class="header-meta">
+      <div>Case Number: <strong>{{ case.case_number }}</strong></div>
+      <div>Generated: <strong>{{ now_str }}</strong></div>
+      <div>Confidential Agronomic Record</div>
+    </div>
+  </div>
+
+  <!-- Metadata Overview -->
+  <div class="meta-grid">
+    <div class="meta-cell">
+      <strong>Operator / Farm</strong>
+      <span>{{ case.farm.operator_name if case.farm else 'Farmer' }} &middot; {{ case.farm.name if case.farm else 'Primary' }}</span>
+    </div>
+    <div class="meta-cell">
+      <strong>Field / Acreage</strong>
+      <span>{{ case.field.name if case.field else 'Field 1' }} ({{ case.field.acreage if case.field else '--' }} ac)</span>
+    </div>
+    <div class="meta-cell">
+      <strong>Crop / Stage</strong>
+      <span>{{ case.crop }} ({{ case.growth_stage }})</span>
+    </div>
+    <div class="meta-cell">
+      <strong>Status / Decision</strong>
+      <span>{{ case.status }}</span>
+    </div>
+    <div class="meta-cell">
+      <strong>Assigned Agronomist</strong>
+      <span>{{ case.assigned_agronomist.full_name or case.assigned_agronomist.username if case.assigned_agronomist else 'Unassigned' }}</span>
+    </div>
+    <div class="meta-cell">
+      <strong>Field Coordinates</strong>
+      <span>{% if case.field and case.field.lat %}{{ "%.4f"|format(case.field.lat) }}, {{ "%.4f"|format(case.field.lng) }} (&plusmn;{{ case.field.accuracy_m or 10 }}m){% else %}Coordinates not recorded{% endif %}</span>
+    </div>
+    <div class="meta-cell">
+      <strong>Weather Source</strong>
+      <span>{{ case.weather_source or 'Open-Meteo API' }}</span>
+    </div>
+    <div class="meta-cell">
+      <strong>Review Decision Note</strong>
+      <span>{{ case.decision_note or case.final_suggestion or 'No review note recorded' }}</span>
+    </div>
+  </div>
+
+  <!-- Diagnostic Observations -->
+  <h2>Diagnostic Observations</h2>
+  {% if case.observations and case.observations|length > 0 %}
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 55%;">Visual Observation / Symptom</th>
+        <th style="width: 15%;">Confidence</th>
+        <th style="width: 15%;">Uncertainty</th>
+        <th style="width: 15%;">Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for obs in case.observations %}
+      <tr>
+        <td>{{ obs.description }}</td>
+        <td>{{ "%.1f"|format(obs.confidence) }}%</td>
+        <td>{{ obs.uncertainty or 'Medium' }}</td>
+        <td>{{ obs.note or '--' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color: #64748b; font-size: 8.5pt;">No visual observations recorded for this case.</p>
+  {% endif %}
+
+  <!-- Recommendations with Confidence and Citations -->
+  <h2>Candidate Recommendations & Citations</h2>
+  {% if case.recommendations and case.recommendations|length > 0 %}
+  {% for rec in case.recommendations %}
+  <div class="rec-card">
+    <div class="rec-header">
+      <span>[{{ rec.category }}] {{ rec.title }}</span>
+      <span>Confidence: {{ "%.1f"|format(rec.confidence) }}% ({{ rec.uncertainty }})</span>
+    </div>
+    <div class="rec-meta">
+      {% if rec.why %}<div><strong>Rationale:</strong> {{ rec.why }}</div>{% endif %}
+      {% if rec.evidence %}<div><strong>Evidence:</strong> {{ rec.evidence }}</div>{% endif %}
+      {% if rec.assumptions %}<div><strong>Assumptions:</strong> {{ rec.assumptions }}</div>{% endif %}
+      {% if rec.citation or (rec.chunk_ids and rec.chunk_ids|length > 0) %}
+      <div style="color: #0369a1;">
+        <strong>Citations:</strong> {{ rec.citation or '' }} {% if rec.chunk_ids %}(Chunks: {{ rec.chunk_ids|join(', ') }}){% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p style="color: #64748b; font-size: 8.5pt;">No recommendations recorded.</p>
+  {% endif %}
+
+  <!-- Guardrail Validation Results -->
+  <h2>Safety Guardrail Results</h2>
+  {% if case.guardrail_results and case.guardrail_results|length > 0 %}
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 25%;">Rule Name</th>
+        <th style="width: 20%;">Category</th>
+        <th style="width: 15%;">Status</th>
+        <th style="width: 40%;">Evaluation Details</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for gr in case.guardrail_results %}
+      <tr>
+        <td>{{ gr.rule_name }}</td>
+        <td>{{ gr.rule_category }}</td>
+        <td>
+          <span class="badge {% if gr.status == 'PASSED' %}badge-passed{% elif gr.status == 'FLAGGED' %}badge-flagged{% else %}badge-blocked{% endif %}">
+            {{ gr.status }}
+          </span>
+        </td>
+        <td>{{ gr.details or '--' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color: #64748b; font-size: 8.5pt;">Guardrails passed with no violations recorded.</p>
+  {% endif %}
+
+  <!-- Field Sensors (SIMULATED) Section -->
+  <h2>Field Sensors (SIMULATED)</h2>
+  <div class="simulated-banner">
+    Notice: All sensor data shown below originates from simulated field IoT probes and is intended for agronomic calibration and diagnostic demonstration.
+  </div>
+
+  {% if sensor_readings and sensor_readings|length > 0 %}
+  <table>
+    <thead>
+      <tr>
+        <th>Measured At</th>
+        <th>Soil Moisture</th>
+        <th>Nitrogen (N)</th>
+        <th>Phosphorus (P)</th>
+        <th>Potassium (K)</th>
+        <th>Temp (&deg;C)</th>
+        <th>Humidity</th>
+        <th>pH</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in sensor_readings[:10] %}
+      <tr>
+        <td>{{ r.measured_at.strftime('%Y-%m-%d %H:%M') if r.measured_at else '--' }}</td>
+        <td>{{ "%.1f"|format(r.soil_moisture_pct) if r.soil_moisture_pct is not none else '--' }}%</td>
+        <td>{{ "%.1f"|format(r.n_mgkg) if r.n_mgkg is not none else '--' }} mg/kg</td>
+        <td>{{ "%.1f"|format(r.p_mgkg) if r.p_mgkg is not none else '--' }} mg/kg</td>
+        <td>{{ "%.1f"|format(r.k_mgkg) if r.k_mgkg is not none else '--' }} mg/kg</td>
+        <td>{{ "%.1f"|format(r.temp_c) if r.temp_c is not none else '--' }} &deg;C</td>
+        <td>{{ "%.1f"|format(r.humidity_pct) if r.humidity_pct is not none else '--' }}%</td>
+        <td>{{ "%.2f"|format(r.ph) if r.ph is not none else '--' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color: #64748b; font-size: 8.5pt; margin-bottom: 6px;">No simulated sensor time-series telemetry recorded.</p>
+  {% endif %}
+
+  {% if sensor_interpretation and sensor_interpretation|length > 0 %}
+  <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px 8px; font-size: 8pt; margin-bottom: 8px;">
+    <strong>Agronomic Sensor Interpretation:</strong>
+    <ul style="margin-left: 16px; margin-top: 4px;">
+      {% for item in sensor_interpretation %}
+      <li>{{ item.label or item.rule or item }}: {{ item.message or item.status or '' }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <!-- Assignment History -->
+  <h2>Assignment History</h2>
+  {% if case.assignments and case.assignments|length > 0 %}
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>From</th>
+        <th>To</th>
+        <th>Reason</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in case.assignments %}
+      <tr>
+        <td>{{ a.created_at.strftime('%Y-%m-%d %H:%M') if a.created_at else '--' }}</td>
+        <td>{{ a.from_user.full_name or a.from_user.username if a.from_user else 'System' }}</td>
+        <td>{{ a.to_user.full_name or a.to_user.username if a.to_user else 'Unknown' }}</td>
+        <td>{{ a.reason }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color: #64748b; font-size: 8.5pt;">Initial assignment only.</p>
+  {% endif %}
+
+</body>
+</html>

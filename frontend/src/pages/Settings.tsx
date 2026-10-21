@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Save, 
   Plus, 
@@ -10,13 +10,17 @@ import {
   Download, 
   AlertTriangle,
   Lock,
-  UserCheck
+  UserCheck,
+  Database,
+  RefreshCw
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '@/store/useAppStore';
 import { units, type UnitSystem } from '@/lib/units';
 import { farmsApi } from '@/api/farmsApi';
 import { authApi } from '@/api/authApi';
+import { notificationsApi } from '@/api/notificationsApi';
+import { adminApi, type DemoStatusResponse } from '@/api/adminApi';
 import { auth, updatePassword } from '@/lib/firebase';
 
 export const Settings: React.FC = () => {
@@ -31,6 +35,7 @@ export const Settings: React.FC = () => {
     language,
     setLanguage,
     user,
+    setUser,
   } = useAppStore();
 
   const [available, setAvailable] = useState(true);
@@ -48,12 +53,62 @@ export const Settings: React.FC = () => {
   const [threshold, setThreshold] = useState(88);
   const [requireHumanReviewAll, setRequireHumanReviewAll] = useState(false);
 
-  const [notifCaseCompleted, setNotifCaseCompleted] = useState(true);
-  const [notifExpertReview, setNotifExpertReview] = useState(true);
-  const [notifSafetyAlerts, setNotifSafetyAlerts] = useState(true);
-  const [notifWeeklySummary, setNotifWeeklySummary] = useState(false);
+  // Notification channel preference states
+  const [prefEmail, setPrefEmail] = useState(user?.channel_prefs?.email ?? true);
+  const [prefWhatsapp, setPrefWhatsapp] = useState(user?.channel_prefs?.whatsapp ?? false);
+  const [contactEmail, setContactEmail] = useState(user?.email || '');
+  const [contactPhone, setContactPhone] = useState(user?.phone || '');
+  const [savingPrefs, setSavingPrefs] = useState(false);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Demo Data Management states
+  const [demoStatus, setDemoStatus] = useState<DemoStatusResponse | null>(null);
+  const [isDemoActionLoading, setIsDemoActionLoading] = useState(false);
+  const [showLoadModal, setShowLoadModal] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [demoResult, setDemoResult] = useState<{ message: string; counts?: Record<string, number>; isError?: boolean } | null>(null);
+
+  useEffect(() => {
+    if (user?.role === 'admin') {
+      adminApi.getDemoStatus()
+        .then((res) => setDemoStatus(res))
+        .catch(() => setDemoStatus(null));
+    }
+  }, [user?.role]);
+
+  const handleLoadDemo = async () => {
+    setShowLoadModal(false);
+    setIsDemoActionLoading(true);
+    setDemoResult(null);
+    try {
+      const res = await adminApi.loadDemoData({ cases: 30 });
+      setDemoResult({ message: res.message, counts: res.counts, isError: false });
+      const statusRes = await adminApi.getDemoStatus();
+      setDemoStatus(statusRes);
+    } catch (err: any) {
+      setDemoResult({ message: err?.message || 'Failed to load demo data', isError: true });
+    } finally {
+      setIsDemoActionLoading(false);
+    }
+  };
+
+  const handleResetDemo = async () => {
+    setShowResetModal(false);
+    setIsDemoActionLoading(true);
+    setDemoResult(null);
+    try {
+      const res = await adminApi.resetDemoData();
+      setDemoResult({ message: res.message, counts: res.deleted, isError: false });
+      const statusRes = await adminApi.getDemoStatus();
+      setDemoStatus(statusRes);
+    } catch (err: any) {
+      setDemoResult({ message: err?.message || 'Failed to remove demo data', isError: true });
+    } finally {
+      setIsDemoActionLoading(false);
+    }
+  };
+
 
   // New field modal state
   const [isAddFieldOpen, setIsAddFieldOpen] = useState(false);
@@ -297,10 +352,8 @@ export const Settings: React.FC = () => {
               onChange={(e) => setCurrentModel(e.target.value)}
               className="w-full sm:w-80 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white p-2.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
             >
-              <option value="GPT-4o">GPT-4o (OpenAI)</option>
-              <option value="Claude 3.5 Sonnet">Claude 3.5 Sonnet (Anthropic)</option>
-              <option value="Gemini 1.5 Pro">Gemini 1.5 Pro (Google)</option>
-              <option value="Llama 3.1 70B">Llama 3.1 70B (Meta / Self-hosted)</option>
+              <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Free Tier - Default)</option>
+              <option value="gemini-2.5-flash">Gemini 2.5 Flash (Free Tier)</option>
             </select>
           </div>
 
@@ -506,65 +559,160 @@ export const Settings: React.FC = () => {
         </form>
       </div>
 
-      {/* SECTION 4: NOTIFICATIONS */}
+      {/* SECTION 4: NOTIFICATIONS & CHANNELS */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-sm space-y-4">
-        <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider pb-3 border-b border-slate-100 dark:border-slate-800">
-          Notifications
-        </h3>
-
-        <div className="space-y-3 text-xs divide-y divide-slate-100 dark:divide-slate-800">
-          <div className="flex items-center justify-between pt-2">
-            <div>
-              <span className="font-semibold text-slate-900 dark:text-white block">Case completed</span>
-              <span className="text-[11px] text-slate-400">Receive alerts when AI analysis is ready</span>
-            </div>
-            <input
-              type="checkbox"
-              checked={notifCaseCompleted}
-              onChange={(e) => setNotifCaseCompleted(e.target.checked)}
-              className="w-4 h-4 accent-emerald-600 rounded"
-            />
-          </div>
-
-          <div className="flex items-center justify-between pt-3">
-            <div>
-              <span className="font-semibold text-slate-900 dark:text-white block">Expert review required</span>
-              <span className="text-[11px] text-slate-400">Alert when a case needs agronomist review</span>
-            </div>
-            <input
-              type="checkbox"
-              checked={notifExpertReview}
-              onChange={(e) => setNotifExpertReview(e.target.checked)}
-              className="w-4 h-4 accent-emerald-600 rounded"
-            />
-          </div>
-
-          <div className="flex items-center justify-between pt-3">
-            <div>
-              <span className="font-semibold text-slate-900 dark:text-white block">Safety alerts</span>
-              <span className="text-[11px] text-slate-400">High priority flags on acute chemical restrictions</span>
-            </div>
-            <input
-              type="checkbox"
-              checked={notifSafetyAlerts}
-              onChange={(e) => setNotifSafetyAlerts(e.target.checked)}
-              className="w-4 h-4 accent-emerald-600 rounded"
-            />
-          </div>
-
-          <div className="flex items-center justify-between pt-3">
-            <div>
-              <span className="font-semibold text-slate-900 dark:text-white block">Weekly summary report</span>
-              <span className="text-[11px] text-slate-400">Email digest of farm activity to farm manager</span>
-            </div>
-            <input
-              type="checkbox"
-              checked={notifWeeklySummary}
-              onChange={(e) => setNotifWeeklySummary(e.target.checked)}
-              className="w-4 h-4 accent-emerald-600 rounded"
-            />
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div>
+            <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+              {t('settings.notificationChannels', 'Notification Channels & Alerts')}
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              {t('settings.notificationDesc', 'Configure how diagnostic reports, decision updates, and reminders reach you.')}
+            </p>
           </div>
         </div>
+
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setSavingPrefs(true);
+            try {
+              await notificationsApi.updateNotificationPrefs({
+                channel_prefs: {
+                  email: prefEmail,
+                  whatsapp: prefWhatsapp,
+                  sms: false,
+                },
+                email: contactEmail,
+                phone: contactPhone,
+              });
+              if (user) {
+                setUser({
+                  ...user,
+                  email: contactEmail,
+                  phone: contactPhone,
+                  channel_prefs: {
+                    email: prefEmail,
+                    whatsapp: prefWhatsapp,
+                    sms: false,
+                  },
+                });
+              }
+              setToastMessage(t('settings.prefsSaved', 'Notification preferences saved successfully!'));
+              setTimeout(() => setToastMessage(null), 3000);
+            } catch (err: any) {
+              setToastMessage(err.message || 'Failed to update preferences');
+              setTimeout(() => setToastMessage(null), 3000);
+            } finally {
+              setSavingPrefs(false);
+            }
+          }}
+          className="space-y-4"
+        >
+          <div className="space-y-3 text-xs divide-y divide-slate-100 dark:divide-slate-800">
+            {/* Email Channel */}
+            <div className="flex items-start justify-between pt-2 gap-4">
+              <div>
+                <span className="font-semibold text-slate-900 dark:text-white block">
+                  {t('settings.emailChannel', 'Email Notifications')}
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  {t('settings.emailDesc', 'Receive localized HTML report and direct case links via SMTP email')}
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={prefEmail}
+                onChange={(e) => setPrefEmail(e.target.checked)}
+                className="w-4 h-4 accent-emerald-600 rounded mt-0.5"
+              />
+            </div>
+
+            {/* WhatsApp Channel */}
+            <div className="flex items-start justify-between pt-3 gap-4">
+              <div>
+                <span className="font-semibold text-slate-900 dark:text-white block">
+                  {t('settings.whatsappChannel', 'WhatsApp Alerts')}
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  {t('settings.whatsappDesc', 'Direct mobile messaging for high-priority case decisions and guidance')}
+                </span>
+                <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium pt-1">
+                  {t('settings.whatsappSandboxHint', 'Note: Twilio WhatsApp sandbox requires sending "join <keyword>" to the sandbox number before messages can be received.')}
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={prefWhatsapp}
+                onChange={(e) => setPrefWhatsapp(e.target.checked)}
+                className="w-4 h-4 accent-emerald-600 rounded mt-0.5"
+              />
+            </div>
+
+            {/* SMS Channel */}
+            <div className="flex items-start justify-between pt-3 gap-4 opacity-60">
+              <div>
+                <span className="font-semibold text-slate-900 dark:text-white block">
+                  {t('settings.smsChannel', 'SMS Text Alerts')}
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  {t('settings.smsDesc', 'Standard cellular SMS text messages')}
+                </span>
+                <p className="text-[10px] text-slate-400 italic pt-0.5">
+                  {t('settings.smsDisabledHint', 'SMS provider channel is currently disabled. Please use WhatsApp or Email.')}
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={false}
+                disabled
+                className="w-4 h-4 accent-slate-400 rounded mt-0.5 cursor-not-allowed"
+              />
+            </div>
+          </div>
+
+          {/* Contact Details */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                {t('settings.contactPhone', 'Contact Phone')}
+              </label>
+              <input
+                type="text"
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+                placeholder="+919876543210"
+                className="w-full text-xs p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-700"
+              />
+              <span className="text-[10px] text-slate-400 mt-0.5 block">
+                {t('settings.phoneHint', 'Enter E.164 phone or 10-digit number (defaults to +91).')}
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                {t('settings.contactEmail', 'Contact Email')}
+              </label>
+              <input
+                type="email"
+                value={contactEmail}
+                onChange={(e) => setContactEmail(e.target.value)}
+                placeholder="farmer@example.com"
+                className="w-full text-xs p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-700"
+              />
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <button
+              type="submit"
+              disabled={savingPrefs}
+              className="px-4 py-2 rounded-lg bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs shadow disabled:opacity-50 transition"
+            >
+              {savingPrefs ? t('settings.saving', 'Saving...') : t('settings.saveChannels', 'Save Notification Preferences')}
+            </button>
+          </div>
+        </form>
       </div>
 
       {/* SECTION 5: DATA & PRIVACY */}
@@ -596,6 +744,122 @@ export const Settings: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* SECTION: DEMO DATA (Admin Only, shown only when demo is enabled) */}
+      {user?.role === 'admin' && demoStatus?.enabled && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex items-center gap-2">
+              <Database className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                {t('settings.demoTitle', 'Demo Data Management')}
+              </h3>
+            </div>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              {t('settings.demoEnabled', 'Demo Loader Active')}
+            </span>
+          </div>
+
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {t('settings.demoDesc', 'Seed synthetic cases, farmers, agronomists, outbreaks, and alerts for testing without real farm impact.')}
+          </p>
+
+          {/* Counts pill display */}
+          {demoStatus.has_demo_data && (
+            <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800">
+              <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 block mb-2">
+                {t('settings.demoActiveRecords', 'Active demo records in database')}:
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                <div className="bg-white dark:bg-slate-800 p-2 rounded border border-slate-100 dark:border-slate-700">
+                  <span className="text-slate-400 text-[10px] block">Cases</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">{demoStatus.counts.cases}</span>
+                </div>
+                <div className="bg-white dark:bg-slate-800 p-2 rounded border border-slate-100 dark:border-slate-700">
+                  <span className="text-slate-400 text-[10px] block">Farmers / Agronomists</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">{demoStatus.counts.users}</span>
+                </div>
+                <div className="bg-white dark:bg-slate-800 p-2 rounded border border-slate-100 dark:border-slate-700">
+                  <span className="text-slate-400 text-[10px] block">Farms</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">{demoStatus.counts.farms}</span>
+                </div>
+                <div className="bg-white dark:bg-slate-800 p-2 rounded border border-slate-100 dark:border-slate-700">
+                  <span className="text-slate-400 text-[10px] block">Weather Alerts</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">{demoStatus.counts.weather_alerts}</span>
+                </div>
+                <div className="bg-white dark:bg-slate-800 p-2 rounded border border-slate-100 dark:border-slate-700">
+                  <span className="text-slate-400 text-[10px] block">Notifications</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">{demoStatus.counts.notifications}</span>
+                </div>
+                <div className="bg-white dark:bg-slate-800 p-2 rounded border border-slate-100 dark:border-slate-700">
+                  <span className="text-slate-400 text-[10px] block">Outbreaks</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">{demoStatus.counts.outbreaks}</span>
+                </div>
+                <div className="bg-white dark:bg-slate-800 p-2 rounded border border-slate-100 dark:border-slate-700">
+                  <span className="text-slate-400 text-[10px] block">Eval Runs</span>
+                  <span className="font-bold text-slate-800 dark:text-slate-100">{demoStatus.counts.eval_runs}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Result summary banner */}
+          {demoResult && (
+            <div className={`p-3 rounded-xl text-xs border ${
+              demoResult.isError
+                ? 'bg-rose-50 border-rose-200 text-rose-900 dark:bg-rose-950/60 dark:border-rose-900 dark:text-rose-200'
+                : 'bg-emerald-50 border-emerald-200 text-emerald-900 dark:bg-emerald-950/60 dark:border-emerald-800 dark:text-emerald-200'
+            }`}>
+              <div className="flex items-center gap-2 font-semibold">
+                {demoResult.isError ? (
+                  <AlertTriangle className="w-4 h-4 text-rose-600" />
+                ) : (
+                  <Check className="w-4 h-4 text-emerald-600" />
+                )}
+                <span>{demoResult.message}</span>
+              </div>
+              {demoResult.counts && Object.keys(demoResult.counts).length > 0 && (
+                <div className="mt-2 pt-2 border-t border-emerald-100 dark:border-emerald-900/40 flex flex-wrap gap-2 text-[11px]">
+                  {Object.entries(demoResult.counts).map(([k, v]) => (
+                    <span key={k} className="px-2 py-0.5 rounded bg-emerald-100/70 dark:bg-emerald-900/50">
+                      <strong>{k}:</strong> {v}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="flex flex-wrap items-center gap-3 pt-2">
+            <button
+              type="button"
+              disabled={isDemoActionLoading}
+              onClick={() => setShowLoadModal(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-emerald-800 hover:bg-emerald-900 text-white shadow transition disabled:opacity-50"
+            >
+              {isDemoActionLoading ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Database className="w-3.5 h-3.5 text-emerald-300" />
+              )}
+              <span>{isDemoActionLoading ? t('settings.loadingDemo', 'Loading Demo Data...') : t('settings.loadDemoBtn', 'Load demo data')}</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={isDemoActionLoading || !demoStatus?.has_demo_data}
+              onClick={() => setShowResetModal(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>{t('settings.removeDemoBtn', 'Remove demo data')}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
 
       {/* Add Field Modal */}
       {isAddFieldOpen && (
@@ -665,6 +929,87 @@ export const Settings: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Load Demo Data Confirmation Modal */}
+      {showLoadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 max-w-md w-full space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center text-emerald-700 dark:text-emerald-400">
+                <Database className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                  {t('settings.confirmLoadTitle', 'Load Demo Data?')}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Safe idempotent generation
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              {t('settings.confirmLoadDesc', 'This will seed 30 cases across 8 farmers, 4 agronomists, weather alerts, and outbreak clusters. Production data will remain untouched.')}
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowLoadModal(false)}
+                className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                {t('settings.cancelBtn', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleLoadDemo}
+                className="px-4 py-2 rounded-lg bg-emerald-800 hover:bg-emerald-900 text-xs font-semibold text-white shadow"
+              >
+                {t('settings.confirmBtn', 'Confirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove Demo Data Confirmation Modal */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 max-w-md w-full space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900 flex items-center justify-center text-rose-600 dark:text-rose-400">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                  {t('settings.confirmRemoveTitle', 'Remove Demo Data?')}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Dependency-ordered deletion
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              {t('settings.confirmRemoveDesc', 'This will delete all demo cases, users, farms, alerts, and evaluation runs tagged as demo data. This action is irreversible.')}
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowResetModal(false)}
+                className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                {t('settings.cancelBtn', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleResetDemo}
+                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-xs font-semibold text-white shadow"
+              >
+                {t('settings.confirmBtn', 'Confirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

@@ -1,0 +1,4 @@
+Subject: Case {case_number} Assigned
+
+Case {case_number} has been assigned to {agronomist_name} for review.
+View case details: {case_url}

@@ -30,11 +30,5 @@ class LocalStorageService(StorageService):
         return destination_path
 
 
-class FirebaseStorageService(StorageService):
-    async def save_file(self, file: UploadFile, subfolder: str = "") -> str:
-        # TODO: Implement upload to Firebase Cloud Storage bucket via google-cloud-storage
-        raise NotImplementedError("Firebase Storage integration will be activated with production credentials.")
-
-
 def get_storage_service() -> StorageService:
     return LocalStorageService()

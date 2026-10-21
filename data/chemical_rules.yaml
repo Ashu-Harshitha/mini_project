@@ -1,0 +1,55 @@
+rules:
+  - name: "UAN 28% Liquid Nitrogen"
+    chemical_name: "UAN 28%"
+    max_rate: 50.0
+    unit: "lb N/ac"
+    stage_window: "V6-V10"
+    organic_allowed: false
+    requires_agronomist: true
+    description: "Mid-season foliar nitrogen application limit. Rate above 50 lb N/ac risks leaf burn. Requires agronomist review."
+
+  - name: "Synthetic Foliar Urea"
+    chemical_name: "Urea"
+    max_rate: 30.0
+    unit: "lb N/ac"
+    stage_window: "V4-V8"
+    organic_allowed: false
+    requires_agronomist: true
+    description: "Foliar urea rescue spray. High ambient temperature volatilization hazard."
+
+  - name: "Lambda-Cyhalothrin Pyrethroid"
+    chemical_name: "Lambda-Cyhalothrin"
+    max_rate: 0.03
+    unit: "lb ai/ac"
+    stage_window: "Flowering"
+    organic_allowed: false
+    requires_agronomist: true
+    description: "Restricted Use Pesticide (RUP). High toxicity to aquatic life and bees. Mandatory buffer zone and agronomist sign-off."
+
+  - name: "Copper Sulfate Organic Fungicide"
+    chemical_name: "Copper Sulfate"
+    max_rate: 2.0
+    unit: "lb/ac"
+    stage_window: "Any"
+    organic_allowed: true
+    requires_agronomist: false
+    description: "OMRI listed copper fungicide for organic disease suppression."
+
+  - name: "Bacillus thuringiensis (Bt)"
+    chemical_name: "Bt Kurstaki"
+    max_rate: 1.5
+    unit: "lb/ac"
+    stage_window: "Vegetative"
+    organic_allowed: true
+    requires_agronomist: false
+    description: "Biological lepidopteran control agent. Organic compliant."
+
+  - name: "Paraquat Dichloride Herbicide"
+    chemical_name: "Paraquat"
+    max_rate: 0.0
+    unit: "lb ai/ac"
+    stage_window: "None"
+    organic_allowed: false
+    requires_agronomist: true
+    description: "Banned restricted herbicide substance. Agricultural use strictly prohibited."
+

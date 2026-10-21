@@ -43,3 +43,13 @@ rules:
     organic_allowed: true
     requires_agronomist: false
     description: "Biological lepidopteran control agent. Organic compliant."
+
+  - name: "Paraquat Dichloride Herbicide"
+    chemical_name: "Paraquat"
+    max_rate: 0.0
+    unit: "lb ai/ac"
+    stage_window: "None"
+    organic_allowed: false
+    requires_agronomist: true
+    description: "Banned restricted herbicide substance. Agricultural use strictly prohibited."
+

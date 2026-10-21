@@ -16,6 +16,7 @@ from app.schemas.schemas import (
     UserMe,
     AvailabilityUpdate,
     LanguageUpdate,
+    NotificationPrefsUpdate,
 )
 from app.api.deps import get_current_user
 from app.auth.firebase_client import get_firebase, FirebaseClient
@@ -197,4 +198,30 @@ def update_language(
     db.commit()
     db.refresh(current_user)
     return current_user
+
+
+@router.put("/me/notification-prefs", response_model=UserMe)
+@me_router.put("/me/notification-prefs", response_model=UserMe)
+def update_notification_prefs(
+    payload: NotificationPrefsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Updates the notification channel preferences (email, whatsapp, sms) and contact details.
+    """
+    current_prefs = dict(current_user.channel_prefs or {"email": True, "whatsapp": False, "sms": False})
+    if payload.channel_prefs:
+        current_prefs.update(payload.channel_prefs)
+    current_user.channel_prefs = current_prefs
+
+    if payload.email is not None:
+        current_user.email = payload.email.strip() or None
+    if payload.phone is not None:
+        current_user.phone = payload.phone.strip() or None
+
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
 

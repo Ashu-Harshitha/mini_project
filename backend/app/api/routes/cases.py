@@ -55,6 +55,7 @@ from app.schemas.schemas import (
     FieldLocationUpdate,
     SensorLatestUpdate,
     GeocodePlaceRead,
+    OutcomeReportIn,
 )
 from app.api.deps import get_current_user
 from app.services.case_state import CaseStateMachine, CaseState
@@ -767,17 +768,124 @@ async def submit_case_feedback(
     return feedback
 
 
+@router.post("/cases/{id}/outcome")
+def report_case_outcome(
+    id: int,
+    payload: OutcomeReportIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Farmer records treatment outcome for their delivered case (improved|same|worse).
+    Upserts into the case outcome_feedback record, transitions case to OUTCOME_REPORTED,
+    and dispatches a notification to the assigned agronomist.
+    """
+    case = db.query(Case).filter(Case.id == id).first()
+    if not case:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Case not found",
+        )
+
+    # 1. Authorization: Only the owner farmer (or admin) can report outcome
+    if case.user_id != current_user.id and current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the farmer who created the case can report its outcome.",
+        )
+
+    # 2. Case must be in DELIVERED status
+    if case.status != CaseState.DELIVERED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Outcome can only be reported for delivered cases. Current status: '{case.status}'",
+        )
+
+    # 3. Only once per case
+    if case.outcome_feedback and case.outcome_feedback.outcome_reported_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Outcome has already been reported for this case.",
+        )
+
+    # 4. Upsert into same outcome_feedback row
+    feedback = case.outcome_feedback
+    if not feedback:
+        feedback = OutcomeFeedback(
+            case_id=case.id,
+            user_id=current_user.id,
+            agronomist_id=case.assigned_agronomist_id,
+            rating=5,
+            yield_impact_rating=5,
+        )
+        db.add(feedback)
+
+    feedback.followed_advice = payload.followed_advice
+    feedback.outcome = payload.outcome
+    feedback.outcome_comment = payload.comment.strip() if payload.comment else None
+    feedback.outcome_reported_at = datetime.datetime.utcnow()
+
+    # 5. Move case to OUTCOME_REPORTED state
+    CaseStateMachine.transition(
+        db,
+        case,
+        CaseState.OUTCOME_REPORTED,
+        user_id=current_user.id,
+        action="OUTCOME_REPORTED",
+        details=f"Outcome: {payload.outcome}, Followed advice: {payload.followed_advice}",
+    )
+
+    db.commit()
+    db.refresh(feedback)
+
+    # 6. Notify the assigned agronomist
+    if case.assigned_agronomist_id:
+        agro = db.query(User).filter(User.id == case.assigned_agronomist_id).first()
+        if agro:
+            notify(
+                "feedback_received",
+                agro,
+                {
+                    "case_number": case.case_number,
+                    "case_id": case.id,
+                    "outcome": payload.outcome,
+                    "rating": feedback.rating,
+                    "message": f"Farmer reported outcome '{payload.outcome}' for Case {case.case_number}."
+                },
+                db,
+                case_id=case.id,
+                background_tasks=background_tasks,
+            )
+
+    return {
+        "status": "success",
+        "case_id": case.id,
+        "case_status": case.status,
+        "followed_advice": feedback.followed_advice,
+        "outcome": feedback.outcome,
+        "comment": feedback.outcome_comment,
+        "outcome_reported_at": feedback.outcome_reported_at,
+    }
+
+
+
 # -----------------------------
 # Existing Diagnostic Endpoints
 # -----------------------------
-@router.get("/guardrails/rules")
-def get_guardrail_rules(db: Session = Depends(get_db)):
-    return db.query(ChemicalRule).all()
-
-
 @router.get("/outcomes", response_model=List[OutcomeFeedbackRead])
-def list_outcomes(db: Session = Depends(get_db)):
-    return db.query(OutcomeFeedback).order_by(OutcomeFeedback.created_at.desc()).all()
+def list_outcomes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    query = db.query(OutcomeFeedback)
+    if current_user.role == "farmer":
+        query = query.join(Case, OutcomeFeedback.case_id == Case.id).filter(Case.user_id == current_user.id)
+    return query.order_by(OutcomeFeedback.created_at.desc()).all()
+
+
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp"}
+MAX_IMAGE_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 
 @router.post("/cases/{id}/files", response_model=CaseFileRead, status_code=status.HTTP_201_CREATED)
@@ -789,6 +897,31 @@ async def upload_case_file(
     current_user: User = Depends(get_current_user),
 ):
     case = get_case_or_404(db, id)
+    if current_user.role == "farmer" and case.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: You can only upload files to your own cases.",
+        )
+
+    # Validate image format
+    filename = (file.filename or "").lower()
+    ext = os.path.splitext(filename)[1]
+    content_type = (file.content_type or "").lower()
+    if ext not in ALLOWED_IMAGE_EXTENSIONS and not content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported file format. Allowed image formats: {', '.join(sorted(ALLOWED_IMAGE_EXTENSIONS))}",
+        )
+
+    # Validate size
+    content = await file.read(MAX_IMAGE_FILE_SIZE + 1)
+    if len(content) > MAX_IMAGE_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Image file exceeds maximum allowed size of 10 MB.",
+        )
+    await file.seek(0)
+
     storage = get_storage_service()
     saved_path = await storage.save_file(file, subfolder=f"case_{case.case_number}")
 
@@ -797,13 +930,42 @@ async def upload_case_file(
         file_type=file_type,
         file_path=saved_path,
         file_name=file.filename or "file",
-        file_size=file.size or 0,
+        file_size=len(content),
         mime_type=file.content_type,
     )
     db.add(case_file)
     db.commit()
     db.refresh(case_file)
     return case_file
+
+
+@router.get("/cases/{id}/files/{file_id}")
+def get_case_file_content(
+    id: Union[int, str],
+    file_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Authenticated access to case media/images.
+    """
+    case = get_case_or_404(db, id)
+    if current_user.role == "farmer" and case.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: You cannot access files for this case.")
+    elif current_user.role == "agronomist":
+        is_assigned = (case.assigned_agronomist_id == current_user.id)
+        is_past = (
+            db.query(Assignment).filter(Assignment.case_id == case.id, Assignment.to_user_id == current_user.id).first()
+            or db.query(Review).filter(Review.case_id == case.id, Review.reviewer_id == current_user.id).first()
+        )
+        if not (is_assigned or is_past):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: Case is not assigned to you.")
+
+    cf = db.query(CaseFile).filter(CaseFile.id == file_id, CaseFile.case_id == case.id).first()
+    if not cf or not cf.file_path or not os.path.exists(cf.file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on server storage.")
+
+    return FileResponse(cf.file_path, media_type=cf.mime_type or "application/octet-stream")
 
 
 @router.post("/cases/{id}/weather", response_model=WeatherSnapshotRead, status_code=status.HTTP_201_CREATED)
@@ -813,6 +975,8 @@ async def fetch_case_weather(
     current_user: User = Depends(get_current_user),
 ):
     case = get_case_or_404(db, id)
+    if current_user.role == "farmer" and case.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: You can only operate on your own cases.")
     lat = None
     lng = None
     if case.location_snapshot and isinstance(case.location_snapshot, dict):
@@ -875,6 +1039,8 @@ def analyze_case(
     current_user: User = Depends(get_current_user),
 ):
     case = get_case_or_404(db, id)
+    if current_user.role == "farmer" and case.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: You can only operate on your own cases.")
     CaseStateMachine.transition(
         db, case, CaseState.ANALYZING, user_id=current_user.id, action="START_ANALYSIS", details="Analyzing visual evidence."
     )
@@ -940,10 +1106,13 @@ def analyze_case(
 @router.post("/cases/{id}/recommend", response_model=List[RecommendationRead])
 def generate_recommendations(
     id: Union[int, str],
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     case = get_case_or_404(db, id)
+    if current_user.role == "farmer" and case.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: You can only operate on your own cases.")
     if case.status in (CaseState.DRAFT, CaseState.ANALYZING):
         analyze_case(id, db, current_user)
 
@@ -1047,6 +1216,11 @@ def generate_recommendations(
     CaseStateMachine.transition(
         db, case, CaseState.PENDING_REVIEW, user_id=current_user.id, action="RECOMMENDATIONS_GENERATED", details="Action candidates synthesized."
     )
+    try:
+        from app.services.outbreaks import run_outbreak_detection_task
+        background_tasks.add_task(run_outbreak_detection_task)
+    except Exception as e:
+        logger.warning(f"Could not enqueue outbreak detection task: {e}")
     return created_recs
 
 
@@ -1057,6 +1231,8 @@ def run_risk_check(
     current_user: User = Depends(get_current_user),
 ):
     case = get_case_or_404(db, id)
+    if current_user.role == "farmer" and case.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: You can only operate on your own cases.")
     is_blocked, results = GuardrailEngine.run_checks(db, case)
     blocked_reason = next((r.details for r in results if r.status == "BLOCKED"), None) if is_blocked else None
 
@@ -1096,6 +1272,285 @@ def run_risk_check(
     }
 
 
+# -------------------------------------------------------------
+# Farmer Guidance Report, Audio TTS & PDF Endpoints
+# -------------------------------------------------------------
+@router.get("/cases/{id}/report")
+def get_farmer_report(
+    id: Union[int, str],
+    lang: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns the farmer guidance report for the case.
+    Available ONLY after a case decision is approved/approved_with_edits/delivered.
+    Checks DB cache for the requested language (en, hi, kn).
+    If not cached for non-English, translates the English body ONCE (single batched call),
+    sets machine_translated=True, and caches it in the reports table.
+    Default lang is viewer's language.
+    """
+    case = get_case_or_404(db, id)
+
+    # Authorization
+    if current_user.role == "farmer" and case.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: you can only view reports for your own cases.",
+        )
+
+    # Report exists only after approval
+    is_decided = case.status.upper() in (
+        "APPROVED",
+        "APPROVED_WITH_EDITS",
+        "DELIVERED",
+        "OUTCOME_REPORTED",
+        "RESOLVED",
+    )
+    if not is_decided:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not available. Case has not been approved.",
+        )
+
+    target_lang = (lang or current_user.language or "en").lower().strip()
+    if target_lang not in ("en", "hi", "kn"):
+        target_lang = "en"
+
+    # 1. Check if cached for requested language
+    report = db.query(Report).filter(Report.case_id == case.id, Report.language == target_lang).first()
+    if report:
+        return {
+            "id": report.id,
+            "case_id": report.case_id,
+            "language": report.language,
+            "body_json": report.body_json,
+            "machine_translated": bool(report.machine_translated),
+            "audio_path": report.audio_path,
+            "created_at": report.created_at,
+        }
+
+    # 2. If not found, get or build English report first
+    en_report = db.query(Report).filter(Report.case_id == case.id, Report.language == "en").first()
+    if not en_report:
+        from app.services.report_builder import build_farmer_guidance_report
+        en_report = build_farmer_guidance_report(db, case)
+
+    if target_lang == "en":
+        return {
+            "id": en_report.id,
+            "case_id": en_report.case_id,
+            "language": en_report.language,
+            "body_json": en_report.body_json,
+            "machine_translated": bool(en_report.machine_translated),
+            "audio_path": en_report.audio_path,
+            "created_at": en_report.created_at,
+        }
+
+    # 3. Translate the English body ONCE (single batched call) with agricultural glossary injection
+    from app.services.translation import translate_report_body
+    translated_body = translate_report_body(en_report.body_json, target_lang)
+
+    new_report = Report(
+        case_id=case.id,
+        language=target_lang,
+        lang=target_lang,
+        body_json=translated_body,
+        machine_translated=True,
+        headline=translated_body.get("what_is_happening", "")[:100],
+        description=translated_body.get("what_is_happening", ""),
+        steps=translated_body.get("next_steps", []),
+        warnings=translated_body.get("warnings", []),
+    )
+    db.add(new_report)
+    db.commit()
+    db.refresh(new_report)
+
+    return {
+        "id": new_report.id,
+        "case_id": new_report.case_id,
+        "language": new_report.language,
+        "body_json": new_report.body_json,
+        "machine_translated": bool(new_report.machine_translated),
+        "audio_path": new_report.audio_path,
+        "created_at": new_report.created_at,
+    }
+
+
+@router.get("/cases/{id}/report/audio")
+def get_report_audio(
+    id: Union[int, str],
+    lang: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Synthesizes and streams plain-language audio using gTTS (en, hi, kn).
+    Splits text into chunks of at most 400 characters on sentence boundaries.
+    Writes MP3 bytes sequentially into one file under uploads/audio/.
+    Caches by sha256(text+lang).
+    Returns 503 {"fallback": "browser"} if gTTS fails or is offline.
+    """
+    case = get_case_or_404(db, id)
+
+    if current_user.role == "farmer" and case.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: you can only access audio for your own cases.",
+        )
+
+    is_decided = case.status.upper() in (
+        "APPROVED",
+        "APPROVED_WITH_EDITS",
+        "DELIVERED",
+        "OUTCOME_REPORTED",
+        "RESOLVED",
+    )
+    if not is_decided:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report audio not available. Case has not been approved.",
+        )
+
+    target_lang = (lang or current_user.language or "en").lower().strip()
+    if target_lang not in ("en", "hi", "kn"):
+        target_lang = "en"
+
+    # Fetch report for target_lang or generate
+    report = db.query(Report).filter(Report.case_id == case.id, Report.language == target_lang).first()
+    if not report:
+        rep_dict = get_farmer_report(id=case.id, lang=target_lang, db=db, current_user=current_user)
+        report = db.query(Report).filter(Report.id == rep_dict["id"]).first()
+
+    body_json = report.body_json if (report and isinstance(report.body_json, dict)) else {}
+
+    from app.services.report_tts import synthesize_report_audio, TTSGenerationError
+    try:
+        audio_file = synthesize_report_audio(body_json, lang=target_lang)
+        if not report.audio_path or report.audio_path != audio_file:
+            report.audio_path = audio_file
+            db.commit()
+
+        return FileResponse(
+            audio_file,
+            media_type="audio/mpeg",
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Disposition": f"inline; filename=report_{case.case_number}_{target_lang}.mp3",
+            },
+        )
+    except Exception as e:
+        logger.warning(f"Audio TTS generation error: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"fallback": "browser", "detail": f"TTS service unavailable: {str(e)}"},
+        )
+
+
+@router.get("/cases/{id}/report.pdf")
+def get_farmer_pdf(
+    id: Union[int, str],
+    lang: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Exports a 1-page PDF guidance report for the farmer (WeasyPrint + Jinja2, Noto Sans fonts).
+    One page with logo, case id, date, what is happening, numbered next steps,
+    a warnings box, the reviewed-by line and a machine-translated note when relevant.
+    """
+    case = get_case_or_404(db, id)
+
+    if current_user.role == "farmer" and case.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: you can only download reports for your own cases.",
+        )
+
+    is_decided = case.status.upper() in (
+        "APPROVED",
+        "APPROVED_WITH_EDITS",
+        "DELIVERED",
+        "OUTCOME_REPORTED",
+        "RESOLVED",
+    )
+    if not is_decided:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="PDF report not available. Case has not been approved.",
+        )
+
+    target_lang = (lang or current_user.language or "en").lower().strip()
+    if target_lang not in ("en", "hi", "kn"):
+        target_lang = "en"
+
+    report = db.query(Report).filter(Report.case_id == case.id, Report.language == target_lang).first()
+    if not report:
+        rep_dict = get_farmer_report(id=case.id, lang=target_lang, db=db, current_user=current_user)
+        report = db.query(Report).filter(Report.id == rep_dict["id"]).first()
+
+    from app.services.pdf_generator import generate_farmer_pdf
+    pdf_bytes = generate_farmer_pdf(case, report, language=target_lang)
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"inline; filename=farmer_report_{case.case_number}_{target_lang}.pdf"
+        },
+    )
+
+
+@router.get("/cases/{id}/report-expert.pdf")
+def get_expert_pdf(
+    id: Union[int, str],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Exports comprehensive expert agronomic diagnostic PDF.
+    Restricted to assigned agronomist and admin ONLY.
+    """
+    if current_user.role == "farmer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Farmers cannot access the expert diagnostic report.",
+        )
+
+    case = get_case_or_404(db, id)
+
+    if current_user.role == "agronomist":
+        is_assigned = (case.assigned_agronomist_id == current_user.id)
+        is_past_assign = (
+            db.query(Assignment)
+            .filter(Assignment.case_id == case.id, Assignment.to_user_id == current_user.id)
+            .first()
+            is not None
+        )
+        is_past_review = (
+            db.query(Review)
+            .filter(Review.case_id == case.id, Review.reviewer_id == current_user.id)
+            .first()
+            is not None
+        )
+        if not (is_assigned or is_past_assign or is_past_review):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: You are not assigned to this case.",
+            )
+
+    from app.services.pdf_generator import generate_expert_pdf
+    pdf_bytes = generate_expert_pdf(case)
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"inline; filename=expert_report_{case.case_number}.pdf"
+        },
+    )
+
+
 @router.post("/cases/{id}/report", response_model=ReportRead, status_code=status.HTTP_201_CREATED)
 def generate_report(
     id: Union[int, str],
@@ -1103,31 +1558,10 @@ def generate_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Backwards compatible report creation trigger."""
     case = get_case_or_404(db, id)
-    translator = get_translator()
-    tts = get_tts()
-
-    headline = f"Field Action Plan: {case.crop} Recovery"
-    field_name = case.field.name if case.field else "Primary Field"
-    field_acreage = f" ({case.field.acreage} ac)" if (case.field and case.field.acreage) else ""
-    description = f"Approved agronomic guidance for field {field_name}{field_acreage}."
-    if lang != "en":
-        headline = translator.translate(headline, target_lang=lang)
-        description = translator.translate(description, target_lang=lang)
-
-    report = Report(
-        case_id=case.id,
-        lang=lang,
-        headline=headline,
-        description=description,
-        steps=[{"number": 1, "instruction": r.title} for r in case.recommendations if r.is_visible_to_farmer],
-        warnings=["Check soil moisture before application."],
-        confidence_explanation="Based on visual leaf symptoms and soil analysis.",
-        audio_url=tts.synthesize_speech(description, lang=lang),
-    )
-    db.add(report)
-    db.commit()
-    db.refresh(report)
+    from app.services.report_builder import build_farmer_guidance_report
+    report = build_farmer_guidance_report(db, case, reviewer=current_user)
     return report
 
 
@@ -1407,6 +1841,12 @@ async def upload_sensor_report_pdf(
 
     db.commit()
 
+    try:
+        from app.services.alerts_engine import check_case_sensor_alerts
+        check_case_sensor_alerts(db, case)
+    except Exception as e:
+        logger.warning(f"Error evaluating sensor alerts for case {case.id}: {e}")
+
     return {
         "parse_report": {
             "rows_ok": parse_res["rows_ok"],
@@ -1499,6 +1939,12 @@ def patch_case_sensor_summary(
     case.sensor_summary = summary
 
     db.commit()
+
+    try:
+        from app.services.alerts_engine import check_case_sensor_alerts
+        check_case_sensor_alerts(db, case)
+    except Exception as e:
+        logger.warning(f"Error evaluating sensor alerts for case {case.id}: {e}")
 
     return {
         "summary": summary,

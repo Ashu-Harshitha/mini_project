@@ -22,6 +22,12 @@ from app.models.models import (
     RAGDocument,
     EvalCase,
     EvalRun,
+    EvalCaseResult,
+    SystemSetting,
+    WeatherAlert,
+    Outbreak,
+    OutbreakNotified,
+    outbreak_cases,
 )
 
 __all__ = [
@@ -48,4 +54,11 @@ __all__ = [
     "RAGDocument",
     "EvalCase",
     "EvalRun",
+    "EvalCaseResult",
+    "SystemSetting",
+    "WeatherAlert",
+    "Outbreak",
+    "OutbreakNotified",
+    "outbreak_cases",
 ]
+

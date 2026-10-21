@@ -1,0 +1,4 @@
+Subject: मामला {case_number} पर नया संदेश
+
+मामला {case_number} के संबंध में {sender_name} से आपको एक नया संदेश मिला है।
+यहाँ उत्तर दें: {case_url}

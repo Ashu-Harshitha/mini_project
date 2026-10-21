@@ -11,7 +11,6 @@ class Settings(BaseSettings):
     
     # AI Engine
     AI_MODE: str = "mock"  # "mock" or "gemini"
-    OPENAI_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash-lite"
     GEMINI_MAX_RPM: int = 8
@@ -32,6 +31,13 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     EMAIL_FROM: str = ""
+    FRONTEND_URL: str = "http://localhost:5173"
+    FEEDBACK_DELAY_MINUTES: int = 10080
+    DEFAULT_COUNTRY_CODE: str = "+91"
+    SMS_ENABLED: bool = False
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_WHATSAPP_FROM: str = ""
     
     # File Storage
     UPLOAD_DIR: str = "./uploads"
@@ -45,7 +51,17 @@ class Settings(BaseSettings):
     SHOW_SAMPLE_SENSOR: bool = True
     LOCATION_MAX_ACCURACY_M: float = 100.0
     WEATHER_CACHE_MINUTES: int = 30
+    WEATHER_CHECK_HOURS: int = 6
     MAX_SENSOR_PDF_MB: float = 5.0
+
+    # Outbreak Detection
+    OUTBREAK_RADIUS_KM: float = 25.0
+    OUTBREAK_MIN_FARMS: int = 3
+    OUTBREAK_WINDOW_DAYS: int = 14
+    OUTBREAK_ALERT_FARMS: int = 6
+
+    # Demo Data Loader
+    ALLOW_DEMO_DATA: bool = False
 
     # RAG & ChromaDB
     CHROMA_PATH: str = "./data/chroma"

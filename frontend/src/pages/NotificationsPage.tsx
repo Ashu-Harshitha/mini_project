@@ -124,7 +124,15 @@ export const NotificationsPage: React.FC = () => {
             return (
               <div
                 key={n.id}
+                onClick={() => {
+                  if (n.caseId) {
+                    markAsRead(n.id);
+                    navigate(`/cases/${n.caseId}`);
+                  }
+                }}
                 className={`p-4 flex items-start justify-between gap-4 text-xs transition ${
+                  n.caseId ? 'cursor-pointer' : ''
+                } ${
                   !n.read ? 'bg-emerald-50/20 dark:bg-emerald-950/15' : 'hover:bg-slate-50/60 dark:hover:bg-slate-800/40'
                 }`}
               >

@@ -23,10 +23,15 @@ import { NotificationsPage } from '@/pages/NotificationsPage';
 import { AgronomistReviewQueue } from '@/pages/AgronomistReviewQueue';
 import { OutcomeFeedbackPage } from '@/pages/OutcomeFeedbackPage';
 import { GuardrailRulesAdmin } from '@/pages/GuardrailRulesAdmin';
+import { AlertsPage } from '@/pages/Alerts';
 import { ManageUsers } from '@/pages/ManageUsers';
 import { AdminCases } from '@/pages/AdminCases';
 import { AdminCommunications } from '@/pages/AdminCommunications';
 import { AdminFeedback } from '@/pages/AdminFeedback';
+import { AdminNotificationLogs } from '@/pages/AdminNotificationLogs';
+import { AdminAnalytics } from '@/pages/AdminAnalytics';
+
+const OutbreakMap = React.lazy(() => import('@/pages/OutbreakMap'));
 
 export const App: React.FC = () => {
   const { 
@@ -149,6 +154,7 @@ export const App: React.FC = () => {
           }
         >
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="alerts" element={<AlertsPage />} />
           <Route path="cases" element={<CaseHistory />} />
           <Route path="cases/:id" element={<CaseDetail />} />
           <Route path="settings" element={<Settings />} />
@@ -184,6 +190,14 @@ export const App: React.FC = () => {
 
           {/* Admin exclusive routes */}
           <Route
+            path="admin/analytics"
+            element={
+              <RoleGuard allowedRoles={['admin']}>
+                <AdminAnalytics />
+              </RoleGuard>
+            }
+          />
+          <Route
             path="admin/agronomists"
             element={
               <RoleGuard allowedRoles={['admin']}>
@@ -212,6 +226,14 @@ export const App: React.FC = () => {
             element={
               <RoleGuard allowedRoles={['admin']}>
                 <AdminCommunications />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="admin/notification-logs"
+            element={
+              <RoleGuard allowedRoles={['admin']}>
+                <AdminNotificationLogs />
               </RoleGuard>
             }
           />
@@ -268,6 +290,26 @@ export const App: React.FC = () => {
             element={
               <RoleGuard allowedRoles={['admin']}>
                 <RagExplorer />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="admin/outbreaks"
+            element={
+              <RoleGuard allowedRoles={['admin', 'agronomist']}>
+                <React.Suspense fallback={<div className="p-8 text-center text-slate-500">Loading outbreak map...</div>}>
+                  <OutbreakMap />
+                </React.Suspense>
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="outbreaks"
+            element={
+              <RoleGuard allowedRoles={['admin', 'agronomist']}>
+                <React.Suspense fallback={<div className="p-8 text-center text-slate-500">Loading outbreak map...</div>}>
+                  <OutbreakMap />
+                </React.Suspense>
               </RoleGuard>
             }
           />

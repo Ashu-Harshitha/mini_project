@@ -1,0 +1,4 @@
+Subject: Weather Alert for Field (Case {case_number})
+
+Adverse weather condition detected: {condition}. Take necessary precautions for your crop.
+View field conditions: {case_url}

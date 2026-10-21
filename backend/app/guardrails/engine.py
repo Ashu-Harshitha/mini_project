@@ -51,6 +51,19 @@ class GuardrailEngine:
                         break
 
             if matching_rule:
+                # Check banned chemical (max_rate <= 0.0)
+                if matching_rule.max_rate <= 0.0:
+                    is_blocked = True
+                    results.append(
+                        GuardrailResult(
+                            case_id=case.id,
+                            rule_name=f"Banned Chemical Restriction: {matching_rule.name}",
+                            rule_category="Chemical Safety",
+                            status="BLOCKED",
+                            details=f"Product '{matching_rule.chemical_name}' is banned/prohibited. Application BLOCKED.",
+                        )
+                    )
+
                 # Check dose limit
                 if rec.chemical_dose is not None and rec.chemical_dose > matching_rule.max_rate:
                     gr = GuardrailResult(
@@ -58,6 +71,7 @@ class GuardrailEngine:
                         rule_name=f"Chemical Dose Limit: {matching_rule.name}",
                         rule_category="Chemical Safety",
                         status="FLAGGED",
+
                         details=(
                             f"Proposed rate of {rec.chemical_dose} {rec.chemical_unit or matching_rule.unit} "
                             f"exceeds maximum label threshold of {matching_rule.max_rate} {matching_rule.unit} "
@@ -119,9 +133,20 @@ class GuardrailEngine:
             # -------------------------------------------------------------
             # RULE 3: Confidence Auto-Approval and Visibility Gates
             # -------------------------------------------------------------
+            min_visible_conf = getattr(settings, "MIN_FARMER_VISIBLE_CONFIDENCE", 50.0)
+            auto_approve_conf = getattr(settings, "AUTO_APPROVE_CONFIDENCE_THRESHOLD", 80.0)
+            try:
+                from app.models.models import SystemSetting
+                setting = db.query(SystemSetting).filter(SystemSetting.key == "guardrails_settings").first()
+                if setting and isinstance(setting.value, dict):
+                    min_visible_conf = float(setting.value.get("hide_confidence_threshold", min_visible_conf))
+                    auto_approve_conf = float(setting.value.get("auto_approve_confidence_threshold", auto_approve_conf))
+            except Exception:
+                pass
+
             conf = rec.confidence
-            if conf < settings.MIN_FARMER_VISIBLE_CONFIDENCE:
-                # Confidence < 50: hide from farmer
+            if conf < min_visible_conf:
+                # Confidence < hide threshold: hide from farmer
                 rec.is_visible_to_farmer = False
                 results.append(
                     GuardrailResult(
@@ -131,12 +156,12 @@ class GuardrailEngine:
                         status="FLAGGED",
                         details=(
                             f"Recommendation '{rec.title}' confidence ({conf}%) is below minimum threshold "
-                            f"({settings.MIN_FARMER_VISIBLE_CONFIDENCE}%). Hidden from farmer guidance."
+                            f"({min_visible_conf}%). Hidden from farmer guidance."
                         ),
                     )
                 )
-            elif conf < settings.AUTO_APPROVE_CONFIDENCE_THRESHOLD:
-                # Confidence < 80: cannot auto-approve
+            elif conf < auto_approve_conf:
+                # Confidence < auto approval threshold: cannot auto-approve
                 results.append(
                     GuardrailResult(
                         case_id=case.id,
@@ -145,7 +170,7 @@ class GuardrailEngine:
                         status="FLAGGED",
                         details=(
                             f"Recommendation '{rec.title}' confidence ({conf}%) is below auto-approval threshold "
-                            f"({settings.AUTO_APPROVE_CONFIDENCE_THRESHOLD}%). Mandatory human review required."
+                            f"({auto_approve_conf}%). Mandatory human review required."
                         ),
                     )
                 )
@@ -159,6 +184,7 @@ class GuardrailEngine:
                         details=f"Confidence ({conf}%) meets auto-approval criteria.",
                     )
                 )
+
 
             # -------------------------------------------------------------
             # RULE 4: Agronomic Research / Extension Citation Check

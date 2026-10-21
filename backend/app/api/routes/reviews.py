@@ -175,6 +175,8 @@ def submit_review(
             lang=farmer_lang,
         )
         case.farmer_summary = summary
+        from app.services.report_builder import build_farmer_guidance_report
+        build_farmer_guidance_report(db, case, reviewer=current_user)
 
     # 7. Create messages row kind=decision
     note_text = review_in.note or f"Review decision: {case.status}"
@@ -190,11 +192,15 @@ def submit_review(
     db.add(msg)
 
     # 8. Record Review row
+    now_utc = datetime.datetime.utcnow()
     review = Review(
         case_id=case.id,
         reviewer_id=current_user.id,
         status=case.status,
+        decision=case.status,
+        decided_at=now_utc,
         notes=review_in.note,
+        created_at=now_utc,
     )
     db.add(review)
     db.commit()

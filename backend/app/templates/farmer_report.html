@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="{{ language }}">
+<head>
+  <meta charset="UTF-8">
+  <title>AgriAdvisor Guidance Report - {{ case.case_number }}</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 12mm 15mm;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Noto Sans', 'Noto Sans Devanagari', 'Noto Sans Kannada', Arial, sans-serif;
+      color: #1e293b;
+      line-height: 1.4;
+      font-size: 11pt;
+      background: #ffffff;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid #065f46;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+    }
+    .logo-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .logo-badge {
+      background: #065f46;
+      color: #ffffff;
+      font-weight: 800;
+      font-size: 14pt;
+      padding: 4px 10px;
+      border-radius: 6px;
+      letter-spacing: 0.5px;
+    }
+    .brand-title {
+      font-size: 14pt;
+      font-weight: 700;
+      color: #065f46;
+    }
+    .header-meta {
+      text-align: right;
+      font-size: 9pt;
+      color: #64748b;
+    }
+    .header-meta strong {
+      color: #0f172a;
+    }
+    .section-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+    }
+    .section-card.highlight {
+      background: #ecfdf5;
+      border-color: #a7f3d0;
+    }
+    .section-title {
+      font-size: 11pt;
+      font-weight: 700;
+      color: #065f46;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    .happening-text {
+      font-size: 12pt;
+      font-weight: 600;
+      color: #064e3b;
+      line-height: 1.5;
+    }
+    .steps-container {
+      margin-bottom: 12px;
+    }
+    .step-item {
+      display: flex;
+      gap: 10px;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-bottom: 6px;
+    }
+    .step-num {
+      background: #065f46;
+      color: #ffffff;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      text-align: center;
+      font-size: 10pt;
+      font-weight: 700;
+      line-height: 22px;
+      flex-shrink: 0;
+    }
+    .step-content {
+      flex: 1;
+    }
+    .step-title {
+      font-size: 10.5pt;
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .step-detail {
+      font-size: 9.5pt;
+      color: #334155;
+      margin-top: 2px;
+    }
+    .warnings-box {
+      background: #fffbeb;
+      border: 1.5px solid #fde68a;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+    }
+    .warnings-title {
+      font-size: 10pt;
+      font-weight: 700;
+      color: #b45309;
+      margin-bottom: 4px;
+    }
+    .warning-item {
+      font-size: 9.5pt;
+      color: #78350f;
+      margin-bottom: 3px;
+      padding-left: 12px;
+      position: relative;
+    }
+    .warning-item::before {
+      content: "•";
+      position: absolute;
+      left: 0;
+      color: #d97706;
+      font-weight: bold;
+    }
+    .footer {
+      border-top: 1px solid #e2e8f0;
+      padding-top: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 8.5pt;
+      color: #64748b;
+    }
+    .reviewer-tag {
+      font-weight: 600;
+      color: #0f172a;
+    }
+    .machine-trans-badge {
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      padding: 3px 8px;
+      border-radius: 4px;
+      color: #475569;
+      font-size: 8pt;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo-box">
+      <div class="logo-badge">AgriAdvisor</div>
+      <div class="brand-title">Farmer Guidance Plan</div>
+    </div>
+    <div class="header-meta">
+      <div>Case ID: <strong>{{ case.case_number }}</strong></div>
+      <div>Date: <strong>{{ date_formatted }}</strong></div>
+      <div>Crop: <strong>{{ case.crop }} ({{ case.growth_stage }})</strong></div>
+    </div>
+  </div>
+
+  <!-- What Is Happening -->
+  <div class="section-card highlight">
+    <div class="section-title">What Is Happening In Your Field</div>
+    <div class="happening-text">{{ body.what_is_happening }}</div>
+  </div>
+
+  <!-- Numbered Next Steps -->
+  <div class="steps-container">
+    <div class="section-title">Recommended Next Steps</div>
+    {% for step in body.next_steps %}
+    <div class="step-item">
+      <div class="step-num">{{ loop.index }}</div>
+      <div class="step-content">
+        <div class="step-title">{{ step.title }}</div>
+        <div class="step-detail">{{ step.detail }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Warnings Box -->
+  {% if body.warnings and body.warnings|length > 0 %}
+  <div class="warnings-box">
+    <div class="warnings-title">Safety & Risk Precautions</div>
+    {% for w in body.warnings %}
+    <div class="warning-item">{{ w }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Footer & Verification Line -->
+  <div class="footer">
+    <div>
+      Verified by: <span class="reviewer-tag">{{ body.reviewed_by }}</span>
+      {% if body.reviewed_at %} &middot; Reviewed: {{ body.reviewed_at[:10] }}{% endif %}
+    </div>
+    {% if machine_translated %}
+    <div class="machine-trans-badge">
+      Machine-translated advice &middot; Automated translation
+    </div>
+    {% endif %}
+  </div>
+
+</body>
+</html>

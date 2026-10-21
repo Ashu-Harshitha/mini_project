@@ -6,11 +6,13 @@ from sqlalchemy import (
     Float,
     Boolean,
     DateTime,
+    Date,
     ForeignKey,
     Text,
     JSON,
     Index,
     UniqueConstraint,
+    Table,
     text,
 )
 from sqlalchemy.orm import relationship
@@ -37,9 +39,11 @@ class User(Base):
     role = Column(String(50), default="farmer", nullable=False)  # 'farmer', 'agronomist', 'admin'
     phone = Column(String(50), nullable=True)
     language = Column(String(10), default="en", nullable=False)  # 'en', 'hi', 'kn'
+    channel_prefs = Column(JSON, default=lambda: {"email": True, "whatsapp": False, "sms": False}, nullable=False)
     active = Column(Boolean, default=True, nullable=False)
     available = Column(Boolean, default=True, nullable=False)
     max_open_cases = Column(Integer, default=5, nullable=False)
+    is_demo = Column(Boolean, default=False, nullable=False)
     last_assigned_at = Column(DateTime, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
@@ -64,11 +68,15 @@ class Farm(Base):
     primary_crops = Column(JSON, nullable=True, default=list)  # ["Corn", "Soybean"]
     irrigation_system = Column(String(100), default="Center pivot")
     is_organic = Column(Boolean, default=False)
+    is_demo = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
 
+    last_weather_check_at = Column(DateTime, nullable=True)
+
     fields = relationship("Field", back_populates="farm", cascade="all, delete-orphan")
     cases = relationship("Case", back_populates="farm")
+    alerts = relationship("WeatherAlert", back_populates="farm", cascade="all, delete-orphan")
 
 
 class Field(Base):
@@ -94,6 +102,7 @@ class Field(Base):
     farm = relationship("Farm", back_populates="fields")
     cases = relationship("Case", back_populates="field")
     sensor_reports = relationship("SensorReport", back_populates="field", cascade="all, delete-orphan")
+    alerts = relationship("WeatherAlert", back_populates="field")
 
 
 class Case(Base):
@@ -113,7 +122,7 @@ class Case(Base):
     summary = Column(Text, nullable=True)
     description = Column(Text, nullable=True)
     description_lang = Column(String(10), default="en", nullable=True)
-    assigned_agronomist_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    assigned_agronomist_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True)
     assigned_at = Column(DateTime, nullable=True)
     reassign_count = Column(Integer, default=0, nullable=False)
     farmer_summary = Column(Text, nullable=True)
@@ -122,10 +131,13 @@ class Case(Base):
     issue_label = Column(Text, nullable=True)
     issue_category = Column(String(50), nullable=True)  # nitrogen_deficiency|nutrient_other|fungal_disease|bacterial_disease|pest_damage|water_stress|weed_pressure|healthy|other
     ai_degraded = Column(Boolean, default=False, nullable=False)
+    is_demo = Column(Boolean, default=False, nullable=False)
     sensor_summary = Column(JSON, nullable=True)
     location_snapshot = Column(JSON, nullable=True)  # {lat, lng, accuracy_m, source}
     weather_source = Column(String(50), nullable=True, default="none")  # api|none
-    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    feedback_reminders_sent = Column(Integer, default=0, nullable=False)
+    delivered_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True, nullable=False)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
 
     farm = relationship("Farm", back_populates="cases")
@@ -146,6 +158,7 @@ class Case(Base):
     audit_logs = relationship("AuditLog", back_populates="case", cascade="all, delete-orphan")
     assignments = relationship("Assignment", back_populates="case", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="case", cascade="all, delete-orphan")
+    outbreaks = relationship("Outbreak", secondary="outbreak_cases", back_populates="cases")
 
 
 class CaseFile(Base):
@@ -238,7 +251,7 @@ class SensorReport(Base):
     period_end = Column(DateTime, nullable=True)
     rows_count = Column(Integer, default=0, nullable=False)
     warnings = Column(JSON, nullable=True, default=list)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True, nullable=False)
 
     case = relationship("Case", back_populates="sensor_reports")
     field = relationship("Field", back_populates="sensor_reports")
@@ -322,6 +335,8 @@ class Review(Base):
     case_id = Column(Integer, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
     reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     status = Column(String(50), nullable=False)  # 'APPROVED', 'APPROVED_WITH_EDITS', 'REJECTED'
+    decision = Column(String(50), nullable=True)
+    decided_at = Column(DateTime, default=datetime.datetime.utcnow, index=True, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 
@@ -331,17 +346,26 @@ class Review(Base):
 
 class Report(Base):
     __tablename__ = "reports"
+    __table_args__ = (
+        UniqueConstraint("case_id", "language", name="uq_reports_case_id_language"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     case_id = Column(Integer, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
-    lang = Column(String(10), default="en")
-    headline = Column(String(255), nullable=False)
-    description = Column(Text, nullable=False)
-    steps = Column(JSON, nullable=True)  # [{"number": 1, "title": "...", "instruction": "..."}]
-    warnings = Column(JSON, nullable=True)  # ["..."]
+    language = Column(String(10), default="en", nullable=False)
+    body_json = Column(JSON, nullable=False)
+    machine_translated = Column(Boolean, default=False, nullable=False)
+    audio_path = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    # Legacy fields kept for backwards compatibility
+    lang = Column(String(10), default="en", nullable=True)
+    headline = Column(String(255), nullable=True)
+    description = Column(Text, nullable=True)
+    steps = Column(JSON, nullable=True)
+    warnings = Column(JSON, nullable=True)
     confidence_explanation = Column(Text, nullable=True)
     audio_url = Column(String(500), nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 
     case = relationship("Case", back_populates="reports")
 
@@ -354,8 +378,12 @@ class Notification(Base):
     event = Column(String(100), nullable=False)  # 'high_risk_flag', 'review_required', 'case_approved', 'feedback_reminder'
     title = Column(String(255), nullable=False)
     message = Column(Text, nullable=False)
-    channel = Column(String(50), default="in_app")  # 'in_app', 'email', 'sms', 'whatsapp'
+    channel = Column(String(50), default="in_app", nullable=False)  # 'in_app', 'email', 'sms', 'whatsapp'
+    status = Column(String(50), default="sent", nullable=False)  # 'sent', 'failed', 'skipped', 'read'
+    error = Column(Text, nullable=True)
+    attempts = Column(Integer, default=1, nullable=False)
     is_read = Column(Boolean, default=False)
+    is_demo = Column(Boolean, default=False, nullable=False)
     case_id = Column(Integer, ForeignKey("cases.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 
@@ -378,6 +406,10 @@ class OutcomeFeedback(Base):
     yield_impact_rating = Column(Integer, default=5)  # 1-5
     harvest_yield = Column(Float, nullable=True)  # bu/ac or kg/ha
     notes = Column(Text, nullable=True)
+    followed_advice = Column(Boolean, nullable=True)
+    outcome = Column(String(50), nullable=True)  # 'improved', 'same', 'worse'
+    outcome_comment = Column(Text, nullable=True)
+    outcome_reported_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 
     case = relationship("Case", back_populates="outcome_feedback")
@@ -412,7 +444,7 @@ class Message(Base):
     original_text = Column(Text, nullable=True)
     audio_path = Column(String(500), nullable=True)
     transcript_status = Column(String(50), default="none", nullable=False)  # 'none', 'pending', 'done', 'failed'
-    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True, nullable=False)
 
     case = relationship("Case", back_populates="messages")
     sender = relationship("User", foreign_keys=[sender_id])
@@ -513,12 +545,18 @@ class EvalCase(Base):
     __tablename__ = "eval_cases"
 
     id = Column(Integer, primary_key=True, index=True)
+    case_identifier = Column(String(100), unique=True, index=True, nullable=True)
     case_id = Column(Integer, ForeignKey("cases.id", ondelete="SET NULL"), nullable=True)
+    case_type = Column(String(50), default="image", nullable=False)
     crop = Column(String(100), nullable=True)
     ground_truth_category = Column(String(100), nullable=True)
     ground_truth_label = Column(String(255), nullable=True)
     description = Column(Text, nullable=True)
     image_path = Column(String(500), nullable=True)
+    expected_keywords = Column(JSON, nullable=True)
+    sensor_scenario = Column(String(50), nullable=True)
+    is_unsafe = Column(Boolean, default=False, nullable=False)
+    extra_data = Column(JSON, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 
@@ -533,4 +571,120 @@ class EvalRun(Base):
     total_cases = Column(Integer, default=0, nullable=False)
     accuracy = Column(Float, default=0.0, nullable=False)
     metrics = Column(JSON, nullable=True)
+    status = Column(String(50), default="completed", nullable=False)  # 'running', 'paused', 'completed', 'failed'
+    is_demo = Column(Boolean, default=False, nullable=False)
+    started_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    results = relationship("EvalCaseResult", back_populates="run", cascade="all, delete-orphan")
+
+
+class EvalCaseResult(Base):
+    __tablename__ = "eval_case_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    eval_run_id = Column(Integer, ForeignKey("eval_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    case_id = Column(String(100), nullable=False, index=True)
+    case_type = Column(String(50), default="image", nullable=False)
+    passed = Column(Boolean, default=False, nullable=False)
+    model_output = Column(JSON, nullable=True)
+    ground_truth = Column(JSON, nullable=True)
+    failure_reason = Column(Text, nullable=True)
+    metrics = Column(JSON, nullable=True)
+    latency_ms = Column(Integer, default=0, nullable=False)
+    tokens_in = Column(Integer, default=0, nullable=False)
+    tokens_out = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    run = relationship("EvalRun", back_populates="results")
+
+
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+
+    key = Column(String(100), primary_key=True, index=True)
+    value = Column(JSON, nullable=False)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
+
+
+class WeatherAlert(Base):
+    __tablename__ = "weather_alerts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    farm_id = Column(Integer, ForeignKey("farms.id", ondelete="CASCADE"), nullable=False)
+    field_id = Column(Integer, ForeignKey("fields.id", ondelete="SET NULL"), nullable=True)
+    source = Column(String(20), nullable=False)  # "weather" | "sensor"
+    rule = Column(String(50), nullable=False)
+    severity = Column(String(20), nullable=False)  # "info" | "warning" | "high"
+    start_date = Column(Date, nullable=False)
+    params = Column(JSON, nullable=True, default=dict)
+    dedupe_key = Column(String(100), unique=True, index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    notified_at = Column(DateTime, nullable=True)
+    read_at = Column(DateTime, nullable=True, index=True)
+    is_demo = Column(Boolean, default=False, nullable=False)
+
+    __table_args__ = (
+        Index("ix_weather_alerts_farm_created", "farm_id", "created_at"),
+        UniqueConstraint("farm_id", "rule", "start_date", name="uq_weather_alerts_farm_rule_date"),
+    )
+
+    farm = relationship("Farm", back_populates="alerts")
+    field = relationship("Field", back_populates="alerts")
+
+
+# -----------------------------
+# Outbreak Detection Models
+# -----------------------------
+outbreak_cases = Table(
+    "outbreak_cases",
+    Base.metadata,
+    Column("outbreak_id", Integer, ForeignKey("outbreaks.id", ondelete="CASCADE"), primary_key=True),
+    Column("case_id", Integer, ForeignKey("cases.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+class Outbreak(Base):
+    __tablename__ = "outbreaks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    issue_category = Column(String(50), nullable=False, index=True)
+    crop = Column(String(100), nullable=False, index=True)
+    center_lat = Column(Float, nullable=False)
+    center_lng = Column(Float, nullable=False)
+    radius_km = Column(Float, default=25.0, nullable=False)
+    farm_count = Column(Integer, default=0, nullable=False)
+    case_count = Column(Integer, default=0, nullable=False)
+    severity = Column(String(20), default="watch", nullable=False)  # watch | alert
+    status = Column(String(20), default="open", nullable=False, index=True)  # open | resolved
+    is_demo = Column(Boolean, default=False, nullable=False)
+    first_seen = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    last_seen = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    resolved_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_outbreaks_category_crop", "issue_category", "crop"),
+    )
+
+    cases = relationship("Case", secondary=outbreak_cases, back_populates="outbreaks")
+    notifications = relationship("OutbreakNotified", back_populates="outbreak", cascade="all, delete-orphan")
+
+
+class OutbreakNotified(Base):
+    __tablename__ = "outbreak_notified"
+
+    id = Column(Integer, primary_key=True, index=True)
+    outbreak_id = Column(Integer, ForeignKey("outbreaks.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    notified_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("outbreak_id", "user_id", name="uq_outbreak_notified_user"),
+    )
+
+    outbreak = relationship("Outbreak", back_populates="notifications")
+    user = relationship("User")
+
+
+

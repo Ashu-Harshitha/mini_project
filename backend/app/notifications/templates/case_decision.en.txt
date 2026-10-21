@@ -1,0 +1,4 @@
+Subject: Review Decision for Case {case_number}
+
+A review decision ({decision}) was recorded for Case {case_number}. Your action plan is now available.
+View case details: {case_url}

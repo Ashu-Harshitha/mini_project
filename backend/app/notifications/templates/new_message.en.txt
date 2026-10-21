@@ -1,0 +1,4 @@
+Subject: New Message on Case {case_number}
+
+You have a new message from {sender_name} regarding Case {case_number}.
+Reply here: {case_url}

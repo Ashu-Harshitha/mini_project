@@ -64,15 +64,36 @@ class GeminiClient:
     def __init__(self):
         self.ai_mode = settings.AI_MODE.lower()
         self.api_key = settings.GEMINI_API_KEY
-        self.model_name = settings.GEMINI_MODEL or "gemini-2.5-flash-lite"
+        self._model_name = settings.GEMINI_MODEL or "gemini-2.5-flash-lite"
         self.rate_limiter = RateLimiter(max_rpm=settings.GEMINI_MAX_RPM)
         self._client = None
+
+    @property
+    def model_name(self) -> str:
+        try:
+            from app.core.database import SessionLocal
+            from app.models.models import SystemSetting
+            with SessionLocal() as db:
+                setting = db.query(SystemSetting).filter(SystemSetting.key == "active_model").first()
+                if setting and isinstance(setting.value, dict) and setting.value.get("model"):
+                    return setting.value["model"]
+                elif setting and isinstance(setting.value, str):
+                    return setting.value
+        except Exception:
+            pass
+        return getattr(self, "_model_name", settings.GEMINI_MODEL or "gemini-2.5-flash-lite")
+
+    @model_name.setter
+    def model_name(self, value: str):
+        self._model_name = value
+
 
         if self.ai_mode == "gemini" and self.api_key:
             try:
                 from google import genai
                 self._client = genai.Client(api_key=self.api_key)
                 logger.info(f"Initialized Gemini Client with model {self.model_name}")
+
             except Exception as e:
                 logger.warning(f"Failed to initialize google-genai Client: {e}. Falling back to mock mode.")
                 self.ai_mode = "mock"
@@ -411,7 +432,14 @@ class GeminiClient:
                 "sample_date": "2026-05-12",
                 "needs_confirmation": False,
             }
+        elif step == "groundedness_judge":
+            return {
+                "score": 0.95,
+                "unsupported_claims": [],
+            }
         return {}
+
+
 
     def translate(self, text: str, target_lang: str) -> str:
         """Translates text into target_lang (en, hi, kn)."""

@@ -9,6 +9,7 @@ Enforces valid transitions and records audit logs.
 Rejects illegal transitions with HTTP 409 Conflict.
 """
 
+import datetime
 from typing import Optional, Set, Dict
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -86,6 +87,8 @@ class CaseStateMachine:
 
         # Apply state transition
         case.status = next_state
+        if next_state == CaseState.DELIVERED and case.delivered_at is None:
+            case.delivered_at = datetime.datetime.utcnow()
 
         # Log transition in audit_log
         audit_entry = AuditLog(

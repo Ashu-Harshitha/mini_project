@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft,
   Calendar,
@@ -22,16 +22,27 @@ import {
   Activity,
   Droplets,
   BookOpen,
+  Download,
+  ThumbsUp,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Check,
+  X,
+  Volume2,
+  Sprout,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '@/store/useAppStore';
 import { casesApi } from '@/api/casesApi';
 import { ragApi, type RagChunkDetail } from '@/api/ragApi';
+import { alertsApi, type WeatherAlertItem } from '@/api/alertsApi';
 import { StatusBadge } from '@/components/StatusBadge';
 import { MessageThread } from '@/components/MessageThread';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { VoiceRecorder } from '@/components/VoiceRecorder';
 import { AgronomistSensorPanel } from '@/components/AgronomistSensorPanel';
+import { getIdToken } from '@/lib/firebase';
 import { type CaseItem } from '@/mocks/data';
 
 
@@ -79,10 +90,169 @@ export const CaseDetail: React.FC = () => {
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
+  // Farmer Outcome ("How did it go?") State
+  const [outcomeVal, setOutcomeVal] = useState<'improved' | 'same' | 'worse' | null>(null);
+  const [followedAdvice, setFollowedAdvice] = useState<boolean | null>(null);
+  const [outcomeComment, setOutcomeComment] = useState('');
+  const [submittingOutcome, setSubmittingOutcome] = useState(false);
+  const [outcomeSubmitted, setOutcomeSubmitted] = useState(false);
+  const [outcomeError, setOutcomeError] = useState<string | null>(null);
+
   // Field sensor state for farmer view
   const [farmerSensors, setFarmerSensors] = useState<any>(null);
+  const [farmAlerts, setFarmAlerts] = useState<WeatherAlertItem[]>([]);
 
   const role = user?.role || 'farmer';
+
+  useEffect(() => {
+    const farmId = caseItem?.farm_id || caseItem?.farmId || caseItem?.farm?.id;
+    if (farmId) {
+      alertsApi.getAlerts({ farm: Number(farmId), limit: 10 })
+        .then((res) => setFarmAlerts(res.items))
+        .catch((err) => console.warn('Failed to load farm alerts for case:', err));
+    }
+  }, [caseItem?.farm_id, caseItem?.farmId, caseItem?.farm?.id]);
+
+  // Guidance Report State
+  const [reportLang, setReportLang] = useState<'en' | 'hi' | 'kn'>(
+    (user?.language as 'en' | 'hi' | 'kn') || (appLang as 'en' | 'hi' | 'kn') || 'en'
+  );
+  const [reportData, setReportData] = useState<any>(null);
+  const [loadingReport, setLoadingReport] = useState(false);
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [downloadingFarmerPdf, setDownloadingFarmerPdf] = useState(false);
+  const [downloadingExpertPdf, setDownloadingExpertPdf] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const fetchReport = async (lang: 'en' | 'hi' | 'kn') => {
+    if (!id) return;
+    setLoadingReport(true);
+    try {
+      const data = await casesApi.getCaseReport(id, lang);
+      setReportData(data);
+    } catch (err) {
+      console.error('Failed to load farmer guidance report:', err);
+    } finally {
+      setLoadingReport(false);
+    }
+  };
+
+  useEffect(() => {
+    if (caseItem && id) {
+      const s = (caseItem.rawStatus || caseItem.status || '').toUpperCase();
+      const decided = ['APPROVED', 'APPROVED_WITH_EDITS', 'DELIVERED', 'RESOLVED', 'OUTCOME_REPORTED'].includes(s);
+      if (decided) {
+        fetchReport(reportLang);
+      }
+    }
+  }, [id, caseItem?.status, caseItem?.rawStatus, reportLang]);
+
+  const handleListenClick = async () => {
+    if (window.speechSynthesis && window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+      setIsPlayingAudio(false);
+      return;
+    }
+
+    if (isPlayingAudio && audioRef.current) {
+      audioRef.current.pause();
+      setIsPlayingAudio(false);
+      return;
+    }
+
+    setIsPlayingAudio(true);
+    try {
+      const token = await getIdToken();
+      const audioUrl = casesApi.getCaseReportAudioUrl(id!, reportLang);
+      const res = await fetch(audioUrl, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      if (res.status === 503 || !res.ok) {
+        triggerBrowserSpeech();
+        return;
+      }
+
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      if (!audioRef.current) {
+        audioRef.current = new Audio(blobUrl);
+      } else {
+        audioRef.current.src = blobUrl;
+      }
+
+      audioRef.current.onended = () => {
+        setIsPlayingAudio(false);
+      };
+      audioRef.current.onerror = () => {
+        triggerBrowserSpeech();
+      };
+
+      await audioRef.current.play();
+    } catch (e) {
+      console.warn('Audio stream error, falling back to browser speech:', e);
+      triggerBrowserSpeech();
+    }
+  };
+
+  const triggerBrowserSpeech = () => {
+    if (!('speechSynthesis' in window)) {
+      alert(t('report.speechUnsupported', 'Browser speech synthesis is not supported.'));
+      setIsPlayingAudio(false);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    const body = reportData?.body_json;
+    const what = body?.what_is_happening || caseItem?.farmer_summary || '';
+    const steps = (body?.next_steps || []).map((s: any, idx: number) => `${idx + 1}. ${s.title}. ${s.detail}`).join('. ');
+    const warnings = (body?.warnings || []).join('. ');
+    const textToSpeak = `${what}. ${steps}. ${warnings}`.trim();
+
+    const utterance = new SpeechSynthesisUtterance(textToSpeak || 'Guidance report');
+    const langCodeMap: Record<string, string> = {
+      en: 'en-IN',
+      hi: 'hi-IN',
+      kn: 'kn-IN',
+    };
+    utterance.lang = langCodeMap[reportLang] || 'en-IN';
+    utterance.rate = 0.95;
+
+    utterance.onend = () => {
+      setIsPlayingAudio(false);
+    };
+    utterance.onerror = () => {
+      setIsPlayingAudio(false);
+    };
+
+    window.speechSynthesis.speak(utterance);
+    setIsPlayingAudio(true);
+  };
+
+  const handleDownloadFarmerPdf = async () => {
+    if (!id || downloadingFarmerPdf) return;
+    setDownloadingFarmerPdf(true);
+    try {
+      await casesApi.downloadFarmerPdf(id, reportLang);
+    } catch (e: any) {
+      alert(e.message || 'Failed to download PDF report');
+    } finally {
+      setDownloadingFarmerPdf(false);
+    }
+  };
+
+  const handleDownloadExpertPdf = async () => {
+    if (!id || downloadingExpertPdf) return;
+    setDownloadingExpertPdf(true);
+    try {
+      await casesApi.downloadExpertPdf(id);
+    } catch (e: any) {
+      alert(e.message || 'Failed to download expert PDF report');
+    } finally {
+      setDownloadingExpertPdf(false);
+    }
+  };
 
   const loadCase = async () => {
     if (!id) return;
@@ -178,6 +348,28 @@ export const CaseDetail: React.FC = () => {
       alert(err.message || 'Failed to submit feedback');
     } finally {
       setSubmittingFeedback(false);
+    }
+  };
+
+  // Handle Farmer Outcome Submission ("How did it go?")
+  const handleOutcomeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id || submittingOutcome || outcomeVal === null || followedAdvice === null) return;
+
+    setSubmittingOutcome(true);
+    setOutcomeError(null);
+    try {
+      await casesApi.submitCaseOutcome(id, {
+        followed_advice: followedAdvice,
+        outcome: outcomeVal,
+        comment: outcomeComment || undefined,
+      });
+      setOutcomeSubmitted(true);
+      await loadCase();
+    } catch (err: any) {
+      setOutcomeError(err.message || 'Failed to submit outcome');
+    } finally {
+      setSubmittingOutcome(false);
     }
   };
 
@@ -410,48 +602,109 @@ export const CaseDetail: React.FC = () => {
                 </div>
               </div>
             ) : (
-              /* Approved Advice */
-              <div className="p-6 md:p-8 rounded-3xl bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-800/60 shadow-sm space-y-5">
-                <div>
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-700 text-white mb-2 shadow-sm">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    Verified Expert Advice
-                  </span>
-                  <h3 className="text-lg font-black text-emerald-950 dark:text-emerald-100">
-                    Action Plan for Your Field
-                  </h3>
-                  {caseItem.farmer_summary && (
-                    <p className="mt-2 text-sm text-emerald-900 dark:text-emerald-200 leading-relaxed font-medium">
-                      {caseItem.farmer_summary}
-                    </p>
-                  )}
+              /* Approved Advice - Large Text Guidance Card */
+              <div className="p-6 md:p-8 rounded-3xl bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 shadow-sm space-y-6">
+                {/* Header with Badges & Language Selector */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-emerald-200/60 dark:border-emerald-800/60">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-800 text-white shadow-sm">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      {t('report.verifiedExpertAdvice', 'Verified Expert Advice')}
+                    </span>
+                    {reportData?.machine_translated && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-800">
+                        <Languages className="w-3 h-3" />
+                        {t('report.machineTranslated', 'Machine-translated advice')}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* en / hi / kn Language Selector */}
+                  <div className="flex items-center bg-white dark:bg-slate-900 border border-emerald-200 dark:border-slate-800 rounded-2xl p-1 shadow-xs">
+                    {(['en', 'hi', 'kn'] as const).map((l) => (
+                      <button
+                        key={l}
+                        type="button"
+                        onClick={() => setReportLang(l)}
+                        className={`px-3 py-1 text-xs font-bold rounded-xl transition ${
+                          reportLang === l
+                            ? 'bg-emerald-800 text-white shadow-sm'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-emerald-800 dark:hover:text-emerald-400'
+                        }`}
+                      >
+                        {l === 'en' ? 'English' : l === 'hi' ? 'हिन्दी' : 'ಕನ್ನಡ'}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                {/* Approved Steps */}
-                <div className="space-y-2.5">
-                  <h4 className="text-xs font-bold text-emerald-900 dark:text-emerald-300 uppercase tracking-wider">
-                    Recommended Actions
+                {/* What is happening (Large Text) */}
+                <div>
+                  <h3 className="text-xl md:text-2xl font-black text-emerald-950 dark:text-emerald-100 tracking-tight leading-snug">
+                    {reportData?.body_json?.what_is_happening || caseItem.farmer_summary || t('report.title', 'Action Plan for Your Field')}
+                  </h3>
+                </div>
+
+                {/* Numbered Next Steps */}
+                <div className="space-y-3">
+                  <h4 className="text-xs font-black text-emerald-900 dark:text-emerald-300 uppercase tracking-wider">
+                    {t('report.recommendedActions', 'Recommended Next Steps')}
                   </h4>
-                  {Array.isArray(caseItem.recommendations) &&
-                    caseItem.recommendations.map((rec: any, idx: number) => {
-                      const text = typeof rec === 'string' ? rec : rec.title || rec.action;
-                      return (
+                  <div className="grid grid-cols-1 gap-3">
+                    {reportData?.body_json?.next_steps && reportData.body_json.next_steps.length > 0 ? (
+                      reportData.body_json.next_steps.map((step: any, idx: number) => (
                         <div
                           key={idx}
-                          className="flex items-start gap-3 p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800 shadow-xs"
+                          className="flex items-start gap-4 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800 shadow-xs"
                         >
-                          <div className="w-6 h-6 rounded-full bg-emerald-800 text-white flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">
+                          <div className="w-8 h-8 rounded-full bg-emerald-800 text-white flex items-center justify-center font-black text-sm flex-shrink-0 mt-0.5 shadow-sm">
                             {idx + 1}
                           </div>
-                          <span className="text-xs font-medium text-slate-800 dark:text-slate-200 leading-relaxed">
-                            {text}
+                          <div className="flex-1">
+                            <h5 className="text-sm font-bold text-slate-900 dark:text-white leading-snug">
+                              {step.title}
+                            </h5>
+                            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
+                              {step.detail}
+                            </p>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      Array.isArray(caseItem.recommendations) &&
+                      caseItem.recommendations.map((rec: any, idx: number) => (
+                        <div
+                          key={idx}
+                          className="flex items-start gap-3 p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800"
+                        >
+                          <div className="w-6 h-6 rounded-full bg-emerald-800 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
+                            {idx + 1}
+                          </div>
+                          <span className="text-xs font-medium text-slate-800 dark:text-slate-200">
+                            {typeof rec === 'string' ? rec : rec.title || rec.action}
                           </span>
                         </div>
-                      );
-                    })}
+                      ))
+                    )}
+                  </div>
                 </div>
 
-                {/* Final Suggestion */}
+                {/* Warnings Box */}
+                {reportData?.body_json?.warnings && reportData.body_json.warnings.length > 0 && (
+                  <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 space-y-2">
+                    <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 font-bold text-xs uppercase tracking-wider">
+                      <AlertTriangle className="w-4 h-4 text-amber-600" />
+                      <span>{t('report.warnings', 'Safety & Risk Precautions')}</span>
+                    </div>
+                    <ul className="space-y-1.5 pl-5 list-disc text-xs text-amber-950 dark:text-amber-100 leading-relaxed font-medium">
+                      {reportData.body_json.warnings.map((w: string, idx: number) => (
+                        <li key={idx}>{w}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Final Suggestion if present */}
                 {(caseItem.final_suggestion || caseItem.decision_note) && (
                   <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-200/60 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-300">
                     <strong className="block font-bold text-emerald-800 dark:text-emerald-400 mb-1">
@@ -461,11 +714,197 @@ export const CaseDetail: React.FC = () => {
                   </div>
                 )}
 
-                <div className="text-[11px] text-emerald-800/80 dark:text-emerald-400 font-medium pt-1">
-                  Verified by: {caseItem.assignedAgronomist || caseItem.assigned_agronomist_name || 'Certified Agronomist'}
+                {/* Verification Footer & Action Buttons (Big Listen Button + Download PDF) */}
+                <div className="pt-4 border-t border-emerald-200/60 dark:border-emerald-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="text-xs text-emerald-900 dark:text-emerald-300 font-medium">
+                    {t('report.verifiedBy', 'Verified by')}:{' '}
+                    <strong className="font-bold text-emerald-950 dark:text-white">
+                      {reportData?.body_json?.reviewed_by || caseItem.assignedAgronomist || caseItem.assigned_agronomist_name || 'Certified Agronomist'}
+                    </strong>
+                    {reportData?.body_json?.reviewed_at && (
+                      <span className="text-slate-500 dark:text-slate-400 ml-2">
+                        &middot; {reportData.body_json.reviewed_at.slice(0, 10)}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    {/* Big "Listen" Button */}
+                    <button
+                      type="button"
+                      onClick={handleListenClick}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs shadow-md transition hover:scale-105 active:scale-95"
+                    >
+                      <Volume2 className={`w-4 h-4 ${isPlayingAudio ? 'animate-pulse text-amber-300' : ''}`} />
+                      <span>{isPlayingAudio ? t('report.stop', 'Stop') : t('report.listen', 'Listen')}</span>
+                    </button>
+
+                    {/* "Download PDF" Button */}
+                    <button
+                      type="button"
+                      onClick={handleDownloadFarmerPdf}
+                      disabled={downloadingFarmerPdf}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold text-xs shadow-xs transition"
+                    >
+                      <Download className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
+                      <span>
+                        {downloadingFarmerPdf ? t('report.downloadingPdf', 'Downloading...') : t('report.downloadPdf', 'Download PDF')}
+                      </span>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
+
+            {/* "How did it go?" Follow-up Outcome Card */}
+            <div className="p-6 md:p-8 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-6">
+              <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
+                <h3 className="text-lg md:text-xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+                  <Sprout className="w-6 h-6 text-emerald-600" />
+                  <span>{t('outcome.title', 'How did it go?')}</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  {t('outcome.subtitle', 'Let your agronomist know how your crop responded to the advice.')}
+                </p>
+              </div>
+
+              {caseItem.outcome_feedback?.outcome || outcomeSubmitted ? (
+                <div className="p-5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs space-y-2">
+                  <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-bold text-sm">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                    <span>{t('outcome.recordedTitle', 'Outcome recorded')}</span>
+                  </div>
+                  <p className="text-slate-700 dark:text-slate-300 font-medium">
+                    {t('outcome.condition', 'Condition')}: <strong className="capitalize text-emerald-900 dark:text-emerald-200">{caseItem.outcome_feedback?.outcome || outcomeVal}</strong>
+                    {' · '}
+                    {t('outcome.followedAdvice', 'Followed advice')}: <strong>{(caseItem.outcome_feedback?.followed_advice ?? followedAdvice) ? t('outcome.yes', 'Yes') : t('outcome.no', 'No')}</strong>
+                  </p>
+                  {(caseItem.outcome_feedback?.outcome_comment || outcomeComment) && (
+                    <p className="text-slate-600 dark:text-slate-400 italic">
+                      "{caseItem.outcome_feedback?.outcome_comment || outcomeComment}"
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <form onSubmit={handleOutcomeSubmit} className="space-y-6">
+                  {outcomeError && (
+                    <div className="p-3 rounded-xl bg-rose-50 text-rose-800 text-xs font-medium">
+                      {outcomeError}
+                    </div>
+                  )}
+
+                  {/* Question 1: Did you follow the advice? */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block">
+                      {t('outcome.didYouFollowAdvice', 'Did you follow the advice?')}
+                    </label>
+                    <div className="grid grid-cols-2 gap-3 max-w-sm">
+                      <button
+                        type="button"
+                        onClick={() => setFollowedAdvice(true)}
+                        className={`py-3 px-4 rounded-2xl border text-xs font-black flex items-center justify-center gap-2 transition ${
+                          followedAdvice === true
+                            ? 'bg-emerald-800 text-white border-emerald-800 shadow-md scale-[1.02]'
+                            : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
+                        }`}
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>{t('outcome.yes', 'Yes')}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFollowedAdvice(false)}
+                        className={`py-3 px-4 rounded-2xl border text-xs font-black flex items-center justify-center gap-2 transition ${
+                          followedAdvice === false
+                            ? 'bg-slate-800 text-white border-slate-800 shadow-md scale-[1.02]'
+                            : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
+                        }`}
+                      >
+                        <X className="w-4 h-4" />
+                        <span>{t('outcome.no', 'No')}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Question 2: Crop Outcome (3 Big Buttons: Improved / Same / Worse) */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block">
+                      {t('outcome.cropResult', 'How is your crop doing?')}
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {/* Improved */}
+                      <button
+                        type="button"
+                        onClick={() => setOutcomeVal('improved')}
+                        className={`p-4 rounded-2xl border text-center transition flex flex-col items-center gap-2 ${
+                          outcomeVal === 'improved'
+                            ? 'bg-emerald-700 text-white border-emerald-700 shadow-lg scale-105'
+                            : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 hover:border-emerald-500 text-slate-800 dark:text-slate-200'
+                        }`}
+                      >
+                        <TrendingUp className="w-6 h-6" />
+                        <span className="font-black text-sm">{t('outcome.improved', 'Improved')}</span>
+                        <span className="text-[11px] opacity-80">{t('outcome.improvedDesc', 'Signs of recovery & healthy growth')}</span>
+                      </button>
+
+                      {/* Same */}
+                      <button
+                        type="button"
+                        onClick={() => setOutcomeVal('same')}
+                        className={`p-4 rounded-2xl border text-center transition flex flex-col items-center gap-2 ${
+                          outcomeVal === 'same'
+                            ? 'bg-amber-600 text-white border-amber-600 shadow-lg scale-105'
+                            : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 hover:border-amber-500 text-slate-800 dark:text-slate-200'
+                        }`}
+                      >
+                        <Minus className="w-6 h-6" />
+                        <span className="font-black text-sm">{t('outcome.same', 'Same')}</span>
+                        <span className="text-[11px] opacity-80">{t('outcome.sameDesc', 'No noticeable change yet')}</span>
+                      </button>
+
+                      {/* Worse */}
+                      <button
+                        type="button"
+                        onClick={() => setOutcomeVal('worse')}
+                        className={`p-4 rounded-2xl border text-center transition flex flex-col items-center gap-2 ${
+                          outcomeVal === 'worse'
+                            ? 'bg-rose-700 text-white border-rose-700 shadow-lg scale-105'
+                            : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 hover:border-rose-500 text-slate-800 dark:text-slate-200'
+                        }`}
+                      >
+                        <TrendingDown className="w-6 h-6" />
+                        <span className="font-black text-sm">{t('outcome.worse', 'Worse')}</span>
+                        <span className="text-[11px] opacity-80">{t('outcome.worseDesc', 'Symptoms spread or intensified')}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Comment */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
+                      {t('outcome.commentLabel', 'Comments / Observations (Optional)')}
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={outcomeComment}
+                      onChange={(e) => setOutcomeComment(e.target.value)}
+                      placeholder={t('outcome.commentPlaceholder', 'e.g. Applied fertilizer 3 days ago, leaves greener now...')}
+                      className="w-full text-xs p-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-700 resize-none"
+                    />
+                  </div>
+
+                  <div>
+                    <button
+                      type="submit"
+                      disabled={submittingOutcome || outcomeVal === null || followedAdvice === null}
+                      className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-emerald-800 hover:bg-emerald-900 text-white font-black text-xs shadow-md transition disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {submittingOutcome ? t('outcome.submitting', 'Submitting...') : t('outcome.submitBtn', 'Submit Field Outcome')}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
 
             {/* Farmer Outcome Feedback Form */}
             <div className="p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
@@ -585,6 +1024,21 @@ export const CaseDetail: React.FC = () => {
             </p>
           </div>
         </div>
+
+        {/* Download Expert PDF Button */}
+        {(role === 'agronomist' || role === 'admin') && (
+          <button
+            type="button"
+            onClick={handleDownloadExpertPdf}
+            disabled={downloadingExpertPdf}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 font-bold text-xs shadow-sm transition"
+          >
+            <Download className="w-4 h-4" />
+            <span>
+              {downloadingExpertPdf ? t('report.downloadingPdf', 'Downloading...') : t('report.downloadExpertPdf', 'Download Expert PDF')}
+            </span>
+          </button>
+        )}
       </div>
 
       {/* AI Unavailable Banner */}
@@ -596,6 +1050,52 @@ export const CaseDetail: React.FC = () => {
             <div className="text-xs text-amber-700 dark:text-amber-300">
               Automated AI diagnostic pipeline was degraded or unavailable. Manual expert evaluation required.
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Farm Weather & Sensor Alerts Banner */}
+      {farmAlerts.length > 0 && (
+        <div className="p-4 rounded-2xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/80 shadow-sm space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600" />
+              <span className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                {t('caseDetail.activeFarmAlerts', 'Active Alerts for this Farm')} ({farmAlerts.length})
+              </span>
+            </div>
+            <Link
+              to={`/alerts?farm=${caseItem.farm_id || caseItem.farmId}`}
+              className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 hover:underline"
+            >
+              {t('common.viewAll', 'View All')} →
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
+            {farmAlerts.slice(0, 4).map((alert) => (
+              <div
+                key={alert.id}
+                className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
+                  alert.severity === 'high'
+                    ? 'bg-rose-50/80 dark:bg-rose-950/50 border-rose-200 text-rose-900 dark:text-rose-200'
+                    : 'bg-white/80 dark:bg-slate-800/80 border-amber-200 dark:border-slate-700 text-slate-800 dark:text-slate-200'
+                }`}
+              >
+                <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${alert.severity === 'high' ? 'bg-rose-500' : 'bg-amber-500'}`} />
+                <div className="space-y-0.5 flex-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="font-extrabold">{alert.title}</span>
+                    <span className={`text-[10px] font-bold uppercase px-1.5 py-0.2 rounded ${alert.severity === 'high' ? 'bg-rose-200 text-rose-800' : 'bg-amber-200 text-amber-800'}`}>
+                      {alert.severity}
+                    </span>
+                  </div>
+                  <p className="text-[11px] opacity-90">{alert.message}</p>
+                  <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
+                    ⚡ {alert.action}
+                  </p>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

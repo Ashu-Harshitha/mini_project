@@ -1,0 +1,4 @@
+Subject: Pest/Disease Outbreak Alert in Your Area
+
+A regional outbreak of {pest} on {crop} has been detected in {location}. Inspect your fields early.
+View details: {case_url}

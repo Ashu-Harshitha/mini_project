@@ -1,0 +1,4 @@
+Subject: मामला {case_number} सौंपा गया
+
+मामला {case_number} समीक्षा के लिए {agronomist_name} को सौंपा गया है।
+मामले का विवरण देखें: {case_url}

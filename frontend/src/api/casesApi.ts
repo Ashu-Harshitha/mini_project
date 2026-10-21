@@ -519,5 +519,71 @@ export const casesApi = {
     const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/v1';
     return `${BASE_URL}/cases/${caseId}/sensor-report/file`;
   },
+
+  // Farmer Guidance Report & PDF Export API
+  async getCaseReport(caseId: string | number, lang?: string): Promise<any> {
+    const q = lang ? `?lang=${encodeURIComponent(lang)}` : '';
+    return apiClient<any>(`/cases/${caseId}/report${q}`);
+  },
+
+  getCaseReportAudioUrl(caseId: string | number, lang?: string): string {
+    const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/v1';
+    const q = lang ? `?lang=${encodeURIComponent(lang)}` : '';
+    return `${BASE_URL}/cases/${caseId}/report/audio${q}`;
+  },
+
+  async downloadFarmerPdf(caseId: string | number, lang = 'en'): Promise<void> {
+    const { getIdToken } = await import('@/lib/firebase');
+    const token = await getIdToken();
+    const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/v1';
+    const url = `${BASE_URL}/cases/${caseId}/report.pdf?lang=${encodeURIComponent(lang)}`;
+    const res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error('Failed to download PDF report');
+    const blob = await res.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = `farmer_report_${caseId}_${lang}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+  },
+
+  async downloadExpertPdf(caseId: string | number): Promise<void> {
+    const { getIdToken } = await import('@/lib/firebase');
+    const token = await getIdToken();
+    const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/v1';
+    const url = `${BASE_URL}/cases/${caseId}/report-expert.pdf`;
+    const res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error('Failed to download expert PDF report');
+    const blob = await res.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = `expert_report_${caseId}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(downloadUrl);
+  },
+
+  async submitCaseOutcome(
+    caseId: string | number,
+    payload: {
+      followed_advice: boolean;
+      outcome: 'improved' | 'same' | 'worse';
+      comment?: string;
+    }
+  ): Promise<any> {
+    return apiClient(`/cases/${caseId}/outcome`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
 };
 

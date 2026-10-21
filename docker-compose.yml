@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agriadvisor_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agriadvisor
+      POSTGRES_PASSWORD: agriadvisor_secret
+      POSTGRES_DB: agriadvisor_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agriadvisor -d agriadvisor_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: agriadvisor_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://agriadvisor:agriadvisor_secret@postgres:5432/agriadvisor_db
+      - FRONTEND_URL=http://localhost:5173
+      - AI_MODE=mock
+      - UPLOAD_DIR=/app/uploads
+      - CHROMA_PATH=/app/data/chroma
+      - RAG_TOP_K=4
+      - RAG_MIN_RELEVANCE=30.0
+      - SHOW_SAMPLE_SENSOR=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
+      - chroma:/app/data/chroma
+      - embedding_cache:/home/appuser/.cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: agriadvisor_frontend
+    restart: unless-stopped
+    ports:
+      - "5173:8080"
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  pgdata:
+  uploads:
+  chroma:
+  embedding_cache:

@@ -91,7 +91,10 @@ def test_case_workflow_api(client: TestClient, test_farm):
     assert review_res.status_code in [201, 403]
 
 
-def test_eval_overview_api(client: TestClient):
+def test_eval_overview_api(client: TestClient, test_admin):
+    from app.api.deps import get_current_user
+    from app.main import app
+    app.dependency_overrides[get_current_user] = lambda: test_admin
     res = client.get("/v1/eval/overview")
     assert res.status_code == 200
     data = res.json()

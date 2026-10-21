@@ -332,6 +332,13 @@ def run_case_pipeline(case_id: int, user_id: Optional[int] = None, db: Optional[
             assign_case(case.id, session, reason="auto")
             logger.info(f"Pipeline completed successfully for Case {case.case_number}. Assigned.")
 
+            # Trigger outbreak detection task
+            try:
+                from app.services.outbreaks import run_outbreak_detection_task
+                run_outbreak_detection_task()
+            except Exception as outbreak_err:
+                logger.warning(f"Outbreak detection triggered after case {case.id} reached PENDING_REVIEW failed: {outbreak_err}")
+
         except Exception as ai_err:
             # --------------------------------------------------
             # DEGRADED FAILOVER: QuotaExceededError or any AI Failure
@@ -364,6 +371,13 @@ def run_case_pipeline(case_id: int, user_id: Optional[int] = None, db: Optional[
                 assign_case(case.id, session, reason="auto")
             except Exception as assign_err:
                 logger.error(f"Assignment failed during degraded failover for Case {case.case_number}: {assign_err}")
+
+            # Trigger outbreak detection task
+            try:
+                from app.services.outbreaks import run_outbreak_detection_task
+                run_outbreak_detection_task()
+            except Exception as outbreak_err:
+                logger.warning(f"Outbreak detection triggered after degraded case {case.id} reached PENDING_REVIEW failed: {outbreak_err}")
 
     finally:
         if should_close:

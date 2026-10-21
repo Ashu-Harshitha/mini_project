@@ -8,14 +8,24 @@ from app.core.config import settings
 logger = logging.getLogger("agriadvisor.audio")
 
 MAX_AUDIO_BYTES = 2 * 1024 * 1024  # 2 MB limit
+ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".ogg", ".m4a", ".webm", ".flac", ".aac"}
 
 
 def process_voice_upload(upload_file: UploadFile, subfolder: str = "voice") -> str:
     """
-    Validates audio file size (<= 2 MB), saves it to uploads/voice/,
+    Validates audio format and file size (<= 2 MB), saves it to uploads/voice/,
     and converts it to 16 kHz mono WAV using ffmpeg if available.
     Returns the absolute path to the processed audio file.
     """
+    filename = (upload_file.filename or "").lower()
+    ext = os.path.splitext(filename)[1]
+    content_type = (upload_file.content_type or "").lower()
+    if ext not in ALLOWED_AUDIO_EXTENSIONS and not content_type.startswith("audio/"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported audio format. Allowed extensions: {', '.join(sorted(ALLOWED_AUDIO_EXTENSIONS))}",
+        )
+
     voice_dir = os.path.join(settings.UPLOAD_DIR, subfolder)
     os.makedirs(voice_dir, exist_ok=True)
 

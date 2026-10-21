@@ -1,0 +1,4 @@
+Subject: ಪ್ರಕರಣ {case_number} ನಲ್ಲಿ ಹೊಸ ಸಂದೇಶ
+
+ಪ್ರಕರಣ {case_number} ಕುರಿತು {sender_name} ಅವರಿಂದ ಹೊಸ ಸಂದೇಶ ಬಂದಿದೆ.
+ಇಲ್ಲಿ ಉತ್ತರಿಸಿ: {case_url}

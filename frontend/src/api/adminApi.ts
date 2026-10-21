@@ -222,4 +222,48 @@ export const adminApi = {
       `/admin/feedback${qs ? `?${qs}` : ''}`
     );
   },
+
+  getDemoStatus: async (): Promise<DemoStatusResponse> => {
+    return apiClient<DemoStatusResponse>('/admin/demo/status');
+  },
+
+  loadDemoData: async (params?: { cases?: number; no_firebase?: boolean }): Promise<DemoLoadResponse> => {
+    return apiClient<DemoLoadResponse>('/admin/demo/load', {
+      method: 'POST',
+      body: JSON.stringify(params || {}),
+    });
+  },
+
+  resetDemoData: async (): Promise<DemoResetResponse> => {
+    return apiClient<DemoResetResponse>('/admin/demo', {
+      method: 'DELETE',
+    });
+  },
 };
+
+export interface DemoStatusResponse {
+  enabled: boolean;
+  has_demo_data: boolean;
+  counts: {
+    users: number;
+    farms: number;
+    cases: number;
+    weather_alerts: number;
+    notifications: number;
+    outbreaks: number;
+    eval_runs: number;
+  };
+}
+
+export interface DemoLoadResponse {
+  success: boolean;
+  message: string;
+  counts: Record<string, number>;
+}
+
+export interface DemoResetResponse {
+  success: boolean;
+  message: string;
+  deleted: Record<string, number>;
+}
+

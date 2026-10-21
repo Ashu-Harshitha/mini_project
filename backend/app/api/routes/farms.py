@@ -6,7 +6,7 @@ from app.models.models import Farm, Field, User
 from app.schemas.schemas import FarmCreate, FarmUpdate, FarmRead, FieldCreate, FieldRead
 from app.api.deps import get_current_user
 
-router = APIRouter(prefix="/farms", tags=["Farms & Fields"])
+router = APIRouter(prefix="/farms", tags=["Farms & Fields"], dependencies=[Depends(get_current_user)])
 
 
 @router.post("", response_model=FarmRead, status_code=status.HTTP_201_CREATED)
@@ -23,12 +23,19 @@ def create_farm(
 
 
 @router.get("", response_model=List[FarmRead])
-def list_farms(db: Session = Depends(get_db)):
+def list_farms(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     return db.query(Farm).all()
 
 
 @router.get("/{id}", response_model=FarmRead)
-def get_farm(id: int, db: Session = Depends(get_db)):
+def get_farm(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     farm = db.query(Farm).filter(Farm.id == id).first()
     if not farm:
         raise HTTPException(status_code=404, detail="Farm not found")
@@ -63,6 +70,8 @@ def delete_farm(
     farm = db.query(Farm).filter(Farm.id == id).first()
     if not farm:
         raise HTTPException(status_code=404, detail="Farm not found")
+    if current_user.role == "farmer" and farm.operator_name not in (current_user.full_name, current_user.username):
+        raise HTTPException(status_code=403, detail="Forbidden: You cannot delete this farm.")
     db.delete(farm)
     db.commit()
     return None
@@ -88,7 +97,11 @@ def add_field_to_farm(
 
 
 @router.get("/{id}/fields", response_model=List[FieldRead])
-def list_farm_fields(id: int, db: Session = Depends(get_db)):
+def list_farm_fields(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     farm = db.query(Farm).filter(Farm.id == id).first()
     if not farm:
         raise HTTPException(status_code=404, detail="Farm not found")

@@ -16,6 +16,7 @@ export interface AppUser {
   language?: 'en' | 'hi' | 'kn';
   phone?: string;
   avatarInitials: string;
+  channel_prefs?: { email?: boolean; whatsapp?: boolean; sms?: boolean };
 }
 
 interface AppState {

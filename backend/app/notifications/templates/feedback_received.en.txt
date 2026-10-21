@@ -1,0 +1,4 @@
+Subject: Outcome Feedback Received for Case {case_number}
+
+Farmer outcome feedback was recorded for Case {case_number}. Outcome: {outcome}.
+View feedback details: {case_url}

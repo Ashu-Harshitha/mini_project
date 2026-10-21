@@ -3,7 +3,7 @@ import io
 import datetime
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -18,6 +18,7 @@ from app.models.models import (
     MessageTranslation,
     OutcomeFeedback,
     Review,
+    Notification,
 )
 from app.schemas.schemas import (
     AdminUserRead,
@@ -30,8 +31,22 @@ from app.schemas.schemas import (
     AdminFeedbackRead,
     CaseRead,
     AdminCaseRead,
+    AdminNotificationLogItem,
+    AdminNotificationLogResponse,
+    AdminNotificationTestIn,
+    AdminAnalyticsResponse,
+    AdminDemoStatusResponse,
+    AdminDemoLoadRequest,
+    AdminDemoLoadResponse,
+    AdminDemoResetResponse,
 )
-from app.api.deps import require_role
+from app.services.demo_loader import get_demo_status, load_demo_data, reset_demo_data
+from app.services.analytics import (
+    parse_and_validate_range,
+    get_admin_analytics_data,
+    export_analytics_csv,
+)
+from app.api.deps import require_role, get_current_user
 from app.api.routes.auth import validate_username, validate_password
 from app.auth.firebase_client import get_firebase, FirebaseClient
 from app.services.assignment import get_agronomist_open_count
@@ -701,3 +716,263 @@ def delete_user(
     db.commit()
 
     return {"status": "success", "message": f"User '{target_user.username}' deactivated successfully"}
+
+
+@router.get("/notification-log", response_model=AdminNotificationLogResponse)
+def get_admin_notification_log(
+    channel: Optional[str] = None,
+    status: Optional[str] = None,
+    user_id: Optional[int] = None,
+    event: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db),
+):
+    """
+    Returns global notification audit logs with multi-field filtering and paging.
+    """
+    query = db.query(Notification, User.username).outerjoin(User, Notification.user_id == User.id)
+
+    if channel:
+        query = query.filter(Notification.channel == channel.lower())
+    if status:
+        query = query.filter(Notification.status == status.lower())
+    if user_id:
+        query = query.filter(Notification.user_id == user_id)
+    if event:
+        query = query.filter(Notification.event == event)
+    if start_date:
+        try:
+            s_dt = datetime.datetime.fromisoformat(start_date)
+            query = query.filter(Notification.created_at >= s_dt)
+        except Exception:
+            pass
+    if end_date:
+        try:
+            e_dt = datetime.datetime.fromisoformat(end_date)
+            query = query.filter(Notification.created_at <= e_dt)
+        except Exception:
+            pass
+
+    total = query.count()
+    rows = (
+        query.order_by(Notification.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    items = []
+    for notif, uname in rows:
+        items.append(
+            AdminNotificationLogItem(
+                id=notif.id,
+                user_id=notif.user_id,
+                username=uname,
+                event=notif.event,
+                title=notif.title,
+                message=notif.message,
+                channel=notif.channel,
+                status=notif.status,
+                error=notif.error,
+                attempts=notif.attempts,
+                is_read=notif.is_read,
+                case_id=notif.case_id,
+                created_at=notif.created_at,
+            )
+        )
+
+    return AdminNotificationLogResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post("/notifications/test")
+def send_admin_test_notification(
+    payload: AdminNotificationTestIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Dispatches a test notification for the requested channel to the admin themselves.
+    """
+    channel = payload.channel.lower().strip()
+    if channel not in ("email", "whatsapp", "sms", "in_app"):
+        raise HTTPException(
+            status_code=400,
+            detail="Channel must be one of: email, whatsapp, sms, in_app",
+        )
+
+    subject = f"Test Notification ({channel.upper()})"
+    plain_body = f"This is a test notification on channel {channel} for administrator {current_user.username}."
+    html_body = f"<!DOCTYPE html><html><body><p>{plain_body}</p></body></html>"
+
+    if channel == "in_app":
+        notif = Notification(
+            user_id=current_user.id,
+            event="admin_test",
+            title=subject,
+            message=plain_body,
+            channel="in_app",
+            status="sent",
+            attempts=1,
+            is_read=False,
+        )
+        db.add(notif)
+        db.commit()
+        db.refresh(notif)
+        return {
+            "status": "sent",
+            "channel": "in_app",
+            "notification_id": notif.id,
+            "error": None,
+        }
+
+    from app.services.notifications import dispatch_channel
+    notif = dispatch_channel(
+        channel=channel,
+        user=current_user,
+        subject=subject,
+        plain_body=plain_body,
+        html_body=html_body,
+        event="admin_test",
+        case_id=None,
+        db=db,
+    )
+
+    return {
+        "status": notif.status,
+        "channel": channel,
+        "error": notif.error,
+        "notification_id": notif.id,
+        "attempts": notif.attempts,
+    }
+
+
+# -----------------------------
+# Admin Analytics Endpoints
+# -----------------------------
+@router.get("/analytics", response_model=AdminAnalyticsResponse)
+def get_analytics(
+    from_date: Optional[str] = Query(None, alias="from"),
+    to_date: Optional[str] = Query(None, alias="to"),
+    db: Session = Depends(get_db),
+):
+    """
+    Returns admin analytics with KPIs, period comparisons, zero-filled daily charts,
+    breakdowns, funnel, agronomist workload, and sensor/weather insights.
+    Cached for 60 seconds.
+    """
+    try:
+        from_dt, to_dt, prev_from_dt, prev_to_dt = parse_and_validate_range(from_date, to_date)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+
+    data = get_admin_analytics_data(
+        db=db,
+        from_dt=from_dt,
+        to_dt=to_dt,
+        prev_from_dt=prev_from_dt,
+        prev_to_dt=prev_to_dt,
+        use_cache=True,
+    )
+    return data
+
+
+@router.get("/analytics/export.csv")
+def export_analytics(
+    section: str = Query("kpis", pattern="^(kpis|cases|agents|sensors)$"),
+    from_date: Optional[str] = Query(None, alias="from"),
+    to_date: Optional[str] = Query(None, alias="to"),
+    db: Session = Depends(get_db),
+):
+    """
+    Exports analytics section as CSV with UTF-8 BOM and formula injection protection.
+    """
+    try:
+        from_dt, to_dt, prev_from_dt, prev_to_dt = parse_and_validate_range(from_date, to_date)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+
+    data = get_admin_analytics_data(
+        db=db,
+        from_dt=from_dt,
+        to_dt=to_dt,
+        prev_from_dt=prev_from_dt,
+        prev_to_dt=prev_to_dt,
+        use_cache=True,
+    )
+
+    try:
+        csv_content = export_analytics_csv(data, section=section)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+
+    filename = f"analytics_{section}_{from_dt.strftime('%Y%m%d')}_{to_dt.strftime('%Y%m%d')}.csv"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Content-Type": "text/csv; charset=utf-8",
+    }
+    return StreamingResponse(
+        io.BytesIO(csv_content.encode("utf-8")),
+        media_type="text/csv",
+        headers=headers,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Demo Data Management Endpoints
+# ---------------------------------------------------------------------------
+@router.get("/demo/status", response_model=AdminDemoStatusResponse)
+def demo_status(db: Session = Depends(get_db)):
+    """
+    Returns whether demo data operations are enabled and current demo counts.
+    """
+    return get_demo_status(db)
+
+
+@router.post("/demo/load", response_model=AdminDemoLoadResponse)
+def load_demo(
+    payload: Optional[AdminDemoLoadRequest] = Body(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Loads comprehensive demo data across all entity types.
+    Requires ALLOW_DEMO_DATA=true in server settings (403 otherwise).
+    """
+    if not getattr(settings, "ALLOW_DEMO_DATA", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Demo data operations are disabled. Set ALLOW_DEMO_DATA=true in server configuration.",
+        )
+    num_cases = payload.cases if payload and payload.cases else 30
+    no_firebase = payload.no_firebase if payload else False
+    result = load_demo_data(db, num_cases=num_cases, no_firebase=no_firebase)
+    return result
+
+
+@router.delete("/demo", response_model=AdminDemoResetResponse)
+def reset_demo(db: Session = Depends(get_db)):
+    """
+    Deletes all demo records in dependency order, preserving production data.
+    Requires ALLOW_DEMO_DATA=true in server settings (403 otherwise).
+    """
+    if not getattr(settings, "ALLOW_DEMO_DATA", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Demo data operations are disabled. Set ALLOW_DEMO_DATA=true in server configuration.",
+        )
+    deleted = reset_demo_data(db)
+    return {
+        "success": True,
+        "message": "Demo data successfully removed.",
+        "deleted": deleted,
+    }
+
+
+

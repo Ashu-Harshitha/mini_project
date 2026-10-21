@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next';
 import { useAppStore, type UserRole } from '@/store/useAppStore';
 import { mockFarms } from '@/mocks/data';
 import { useNotifications } from '@/hooks/useNotifications';
+import { modelsApi } from '@/api/modelsApi';
 import { 
   auth, 
   fbSignOut, 
@@ -146,7 +147,35 @@ export const TopBar: React.FC<TopBarProps> = ({ onMobileMenuToggle }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const models = ['Gemini 2.5 Flash', 'GPT-4o', 'Claude 3.5 Sonnet', 'Gemini 1.5 Pro', 'Llama 3.1 70B'];
+  const [liveModels, setLiveModels] = useState<Array<{ id: string; name: string; model_key: string }>>([
+    { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', model_key: 'gemini-2.5-flash-lite' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', model_key: 'gemini-2.5-flash' },
+  ]);
+
+  useEffect(() => {
+    modelsApi.getLiveModels().then((data) => {
+      if (data && data.live_models && data.live_models.length > 0) {
+        setLiveModels(data.live_models.map((m) => ({ id: m.id, name: m.name, model_key: m.model_key || m.id })));
+        if (data.active_model) {
+          const matched = data.live_models.find((m) => (m.model_key || m.id) === data.active_model || m.name.toLowerCase() === data.active_model.toLowerCase());
+          if (matched) {
+            setCurrentModel(matched.name);
+          }
+        }
+      }
+    }).catch(() => {});
+  }, [setCurrentModel]);
+
+  const handleModelChange = async (m: { id: string; name: string; model_key: string }) => {
+    setCurrentModel(m.name);
+    setModelDropdownOpen(false);
+    try {
+      await modelsApi.setActiveModel(m.model_key);
+    } catch (err) {
+      console.warn('Could not persist active model to backend settings:', err);
+    }
+  };
+
   const languages = [
     { code: 'en', label: 'English' },
     { code: 'hi', label: 'हिंदी (Hindi)' },
@@ -231,27 +260,30 @@ export const TopBar: React.FC<TopBarProps> = ({ onMobileMenuToggle }) => {
           </button>
 
           {modelDropdownOpen && (
-            <div className="absolute left-0 mt-1.5 w-48 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl py-1 z-50 text-xs">
+            <div className="absolute left-0 mt-1.5 w-52 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl py-1 z-50 text-xs">
               <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                Default AI Model
+                Live AI Models (Zero Cost)
               </div>
-              {models.map((m) => (
-                <button
-                  key={m}
-                  onClick={() => {
-                    setCurrentModel(m);
-                    setModelDropdownOpen(false);
-                  }}
-                  className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-emerald-50 dark:hover:bg-emerald-950/40 ${
-                    currentModel === m
-                      ? 'font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50/50'
-                      : 'text-slate-700 dark:text-slate-300'
-                  }`}
-                >
-                  <span>{m}</span>
-                  {currentModel === m && <Check className="w-3.5 h-3.5 text-emerald-600" />}
-                </button>
-              ))}
+              {liveModels.map((m) => {
+                const isSelected = currentModel === m.name || currentModel.toLowerCase() === m.model_key.toLowerCase();
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => handleModelChange(m)}
+                    className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-emerald-50 dark:hover:bg-emerald-950/40 ${
+                      isSelected
+                        ? 'font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50/50'
+                        : 'text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <div>
+                      <span>{m.name}</span>
+                      <span className="block text-[10px] text-emerald-600 dark:text-emerald-400 font-normal">Free Tier (Live)</span>
+                    </div>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-emerald-600" />}
+                  </button>
+                );
+              })}
               <div className="border-t border-slate-100 dark:border-slate-800 mt-1 pt-1">
                 <Link
                   to="/models"

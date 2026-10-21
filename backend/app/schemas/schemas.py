@@ -1,6 +1,6 @@
 import datetime
 from typing import List, Optional, Any, Dict, Union
-from pydantic import BaseModel, Field, EmailStr, model_validator
+from pydantic import BaseModel, Field, EmailStr, model_validator, field_validator
 
 
 # -----------------------------
@@ -55,6 +55,7 @@ class UserMe(BaseModel):
     language: str = "en"
     email: Optional[str] = None
     phone: Optional[str] = None
+    channel_prefs: Optional[Dict[str, Any]] = None
     available: bool = True
     max_open_cases: int = 5
 
@@ -70,6 +71,7 @@ class AdminUserRead(BaseModel):
     language: str = "en"
     email: Optional[str] = None
     phone: Optional[str] = None
+    channel_prefs: Optional[Dict[str, Any]] = None
     active: bool = True
     available: bool = True
     max_open_cases: int = 5
@@ -431,11 +433,42 @@ class ReviewRead(BaseModel):
         from_attributes = True
 
 
+class ReportStepItem(BaseModel):
+    title: str
+    detail: str
+
+
+class ReportBodyJson(BaseModel):
+    what_is_happening: str
+    next_steps: List[ReportStepItem] = []
+    warnings: List[str] = []
+    reviewed_by: str
+    reviewed_at: str
+
+
+class FarmerReportRead(BaseModel):
+    id: int
+    case_id: int
+    language: str
+    body_json: Dict[str, Any]
+    machine_translated: bool = False
+    audio_path: Optional[str] = None
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+
 class ReportRead(BaseModel):
     id: int
-    lang: str
-    headline: str
-    description: str
+    case_id: Optional[int] = None
+    language: Optional[str] = "en"
+    lang: Optional[str] = "en"
+    body_json: Optional[Dict[str, Any]] = None
+    machine_translated: Optional[bool] = False
+    audio_path: Optional[str] = None
+    headline: Optional[str] = None
+    description: Optional[str] = None
     steps: Optional[List[Dict[str, Any]]] = None
     warnings: Optional[List[str]] = None
     confidence_explanation: Optional[str] = None
@@ -655,13 +688,65 @@ class NotificationRead(BaseModel):
     event: str
     title: str
     message: str
-    channel: str
-    is_read: bool
+    channel: str = "in_app"
+    status: str = "sent"
+    error: Optional[str] = None
+    attempts: int = 1
+    is_read: bool = False
     case_id: Optional[int] = None
     created_at: datetime.datetime
 
     class Config:
         from_attributes = True
+
+
+class NotificationPrefsUpdate(BaseModel):
+    channel_prefs: Optional[Dict[str, bool]] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+
+class OutcomeReportIn(BaseModel):
+    followed_advice: bool
+    outcome: str
+    comment: Optional[str] = None
+
+    @field_validator("outcome")
+    @classmethod
+    def validate_outcome(cls, v: str) -> str:
+        if v not in ("improved", "same", "worse"):
+            raise ValueError("outcome must be one of: improved, same, worse")
+        return v
+
+
+class AdminNotificationLogItem(BaseModel):
+    id: int
+    user_id: int
+    username: Optional[str] = None
+    event: str
+    title: str
+    message: str
+    channel: str
+    status: str
+    error: Optional[str] = None
+    attempts: int = 1
+    is_read: bool = False
+    case_id: Optional[int] = None
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AdminNotificationLogResponse(BaseModel):
+    items: List[AdminNotificationLogItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class AdminNotificationTestIn(BaseModel):
+    channel: str
 
 
 class PromptTemplateUpdate(BaseModel):
@@ -686,16 +771,316 @@ class PromptTemplateRead(BaseModel):
         from_attributes = True
 
 
-# -----------------------------
-# Evaluation Overview Schema
-# -----------------------------
+class RadarMetric(BaseModel):
+    subject: str
+    value: float
+    benchmark: float = 75.0
+
+
 class EvalOverviewRead(BaseModel):
-    total_cases: int
-    resolved_cases: int
-    flagged_cases: int
-    blocked_cases: int
-    avg_confidence: float
-    safety_score: float
-    groundedness_score: float
-    active_agronomists: int
-    computed_at: datetime.datetime
+    total_cases: int = 0
+    resolved_cases: int = 0
+    flagged_cases: int = 0
+    blocked_cases: int = 0
+    avg_confidence: float = 82.0
+    safety_score: float = 94.0
+    groundedness_score: float = 78.0
+    active_agronomists: int = 4
+    computed_at: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
+    # Extended benchmark fields
+    latest_run: Optional[Dict[str, Any]] = None
+    delta: Optional[Dict[str, str]] = None
+    radar_data: List[RadarMetric] = []
+    status: str = "completed"
+    run_id: Optional[int] = None
+
+
+class EvalRunRequest(BaseModel):
+    prompt_version: int = 1
+    max_cases: int = 12
+    resume: bool = False
+    run_id: Optional[int] = None
+
+
+class GuardrailSettingsUpdate(BaseModel):
+    auto_approve_confidence_threshold: float = Field(ge=0.0, le=100.0, default=80.0)
+    hide_confidence_threshold: float = Field(ge=0.0, le=100.0, default=50.0)
+
+
+# -----------------------------
+# Alert & Weather Forecast Schemas
+# -----------------------------
+class WeatherAlertRead(BaseModel):
+    id: int
+    farm_id: int
+    farm_name: Optional[str] = None
+    field_id: Optional[int] = None
+    field_name: Optional[str] = None
+    source: str  # "weather" | "sensor"
+    rule: str
+    severity: str  # "info" | "warning" | "high"
+    start_date: str
+    title: str
+    message: str
+    action: str
+    params: Optional[Dict[str, Any]] = None
+    created_at: datetime.datetime
+    notified_at: Optional[datetime.datetime] = None
+    read_at: Optional[datetime.datetime] = None
+    is_demo: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class AlertsListResponse(BaseModel):
+    items: List[WeatherAlertRead]
+    total: int
+    unread_count: int
+    page: int
+    limit: int
+
+
+class AlertJobSummary(BaseModel):
+    farms_checked: int
+    alerts_created: int
+    failures: int
+    farms_skipped: int
+    details: List[Dict[str, Any]] = []
+
+
+class ForecastDayItem(BaseModel):
+    date: str
+    temp_max_c: float
+    temp_min_c: float
+    precipitation_mm: float
+    precipitation_probability_pct: int
+    wind_speed_kmh: float
+    uv_index_max: float
+
+
+class FarmForecastResponse(BaseModel):
+    farm_id: int
+    farm_name: str
+    field_id: Optional[int] = None
+    field_name: Optional[str] = None
+    latitude: float
+    longitude: float
+    is_coarsened: bool
+    timezone: str
+    fetched_at: str
+    daily: List[ForecastDayItem]
+    active_alerts_count: int = 0
+
+
+# -----------------------------
+# Analytics Schemas
+# -----------------------------
+class KpiItem(BaseModel):
+    value: Optional[Union[float, int]] = None
+    previous_value: Optional[Union[float, int]] = None
+
+
+class CasePerDayItem(BaseModel):
+    date: str
+    created: int
+    decided: int
+
+
+class ByCropItem(BaseModel):
+    crop: str
+    count: int
+
+
+class ByIssueCategoryItem(BaseModel):
+    category: str
+    count: int
+
+
+class FunnelStageItem(BaseModel):
+    stage: str
+    label_key: str
+    count: int
+    drop_off_pct: float
+
+
+class DecisionMix(BaseModel):
+    approve: int
+    approve_with_edits: int
+    reject: int
+
+
+class AgentStatItem(BaseModel):
+    agronomist_id: int
+    agronomist: str
+    open: int
+    reviewed: int
+    avg_hours_to_decision: Optional[float] = None
+    avg_rating: Optional[float] = None
+    timeout_count: int
+    available: bool
+
+
+class RatingDistributionItem(BaseModel):
+    rating: int
+    count: int
+
+
+class TopFarmItem(BaseModel):
+    farm_id: int
+    farm_name: str
+    count: int
+
+
+class SensorFindingItem(BaseModel):
+    key: str
+    label_key: str
+    count: int
+
+
+class AlertByRuleItem(BaseModel):
+    rule: str
+    count: int
+
+
+class AdminAnalyticsResponse(BaseModel):
+    from_date: str = Field(..., alias="from")
+    to_date: str = Field(..., alias="to")
+    previous_from: str
+    previous_to: str
+    kpis: Dict[str, KpiItem]
+    cases_per_day: List[CasePerDayItem]
+    by_crop: List[ByCropItem]
+    by_issue_category: List[ByIssueCategoryItem]
+    status_funnel: List[FunnelStageItem]
+    decision_mix: DecisionMix
+    ai_agreement_rate: Optional[float] = None
+    agent_stats: List[AgentStatItem]
+    language_mix: Dict[str, List[Dict[str, Any]]]
+    rating_distribution: List[RatingDistributionItem]
+    top_farms_by_cases: List[TopFarmItem]
+    response_time_buckets: Dict[str, int]
+    sensor_findings: List[SensorFindingItem]
+    alerts_by_rule: List[AlertByRuleItem]
+
+    class Config:
+        populate_by_name = True
+
+
+# -----------------------------
+# Outbreak Schemas
+# -----------------------------
+class OutbreakRead(BaseModel):
+    id: int
+    issue_category: str
+    crop: str
+    center_lat: float
+    center_lng: float
+    radius_km: float
+    farm_count: int
+    case_count: int
+    severity: str  # watch | alert
+    status: str  # open | resolved
+    first_seen: datetime.datetime
+    last_seen: datetime.datetime
+    resolved_at: Optional[datetime.datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class OutbreakCaseItem(BaseModel):
+    id: int
+    case_number: str
+    crop: str
+    issue_category: Optional[str] = None
+    status: str
+    created_at: datetime.datetime
+    farm_id: Optional[int] = None
+    farm_name: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+
+    class Config:
+        from_attributes = True
+
+
+class OutbreakFarmItem(BaseModel):
+    farm_id: int
+    farm_name: str
+    operator_name: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    case_count: int = 1
+
+    class Config:
+        from_attributes = True
+
+
+class OutbreakDetailRead(OutbreakRead):
+    cases: List[OutbreakCaseItem] = []
+    farms: List[OutbreakFarmItem] = []
+
+    class Config:
+        from_attributes = True
+
+
+class AdminMapCaseItem(BaseModel):
+    id: int
+    case_number: str
+    crop: str
+    issue_category: str
+    status: str
+    date: datetime.datetime
+    farm_id: Optional[int] = None
+    farm_name: Optional[str] = None
+    lat: float
+    lng: float
+    outbreak_id: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class NearbyOutbreakAlert(BaseModel):
+    outbreak_id: int
+    issue_category: str
+    crop: str
+    severity: str
+    radius_km: float
+    distance_km: Optional[float] = None
+    first_seen: datetime.datetime
+    last_seen: datetime.datetime
+    title: str
+    message: str
+    action: str
+
+    class Config:
+        from_attributes = True
+
+
+# -----------------------------
+# Demo Data Schemas
+# -----------------------------
+class AdminDemoStatusResponse(BaseModel):
+    enabled: bool
+    has_demo_data: bool
+    counts: Dict[str, int]
+
+
+class AdminDemoLoadRequest(BaseModel):
+    cases: int = Field(default=30, ge=1, le=100)
+    no_firebase: bool = False
+
+
+class AdminDemoLoadResponse(BaseModel):
+    success: bool
+    message: str
+    counts: Dict[str, int]
+
+
+class AdminDemoResetResponse(BaseModel):
+    success: bool
+    message: str
+    deleted: Dict[str, int]
+

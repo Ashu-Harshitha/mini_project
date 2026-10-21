@@ -16,12 +16,12 @@ import {
   FileCheck2,
   ShieldAlert,
   Sprout,
-  Bell,
-  Users
+  Users,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '@/store/useAppStore';
 import { getNavItemsForRole } from '@/config/nav';
+import { alertsApi } from '@/api/alertsApi';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -36,6 +36,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { t } = useTranslation();
   const { user } = useAppStore();
+  const [unreadAlerts, setUnreadAlerts] = React.useState<number>(0);
+
+  React.useEffect(() => {
+    let mounted = true;
+    const fetchUnread = async () => {
+      try {
+        const res = await alertsApi.getAlerts({ unread: true, limit: 1 });
+        if (mounted) {
+          setUnreadAlerts(res.unread_count || 0);
+        }
+      } catch {
+        // Silently catch
+      }
+    };
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 60000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [user]);
 
   const currentRole = user?.role || 'farmer';
   const visibleItems = getNavItemsForRole(currentRole);
@@ -104,6 +125,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {visibleItems.map((item) => {
             const Icon = item.icon;
             const labelText = t(item.labelKey, item.defaultLabel);
+            const badge = item.to === '/alerts' ? (unreadAlerts > 0 ? unreadAlerts : undefined) : item.badge;
             return (
               <NavLink
                 key={item.to}
@@ -111,20 +133,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 end={item.to === '/'}
                 title={collapsed ? labelText : undefined}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-150 ${
+                  `flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-all duration-150 relative ${
                     isActive
                       ? 'bg-emerald-800 text-white shadow-sm font-semibold'
                       : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100'
                   } ${collapsed ? 'justify-center px-0' : ''}`
                 }
               >
-                <Icon className={`w-4 h-4 flex-shrink-0`} />
+                <div className="relative">
+                  <Icon className={`w-4 h-4 flex-shrink-0`} />
+                  {collapsed && badge !== undefined && (
+                    <span className="absolute -top-1 -right-1.5 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  )}
+                </div>
                 {!collapsed && (
                   <span className="truncate flex-1 text-left">{labelText}</span>
                 )}
-                {!collapsed && item.badge !== undefined && (
-                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white">
-                    {item.badge}
+                {!collapsed && badge !== undefined && (
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-600 text-white">
+                    {badge}
                   </span>
                 )}
               </NavLink>

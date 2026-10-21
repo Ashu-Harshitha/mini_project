@@ -1,0 +1,4 @@
+Subject: Alert: Unassigned Case {case_number}
+
+Case {case_number} has no active agronomist available and requires manual assignment.
+Review and assign case: {case_url}
